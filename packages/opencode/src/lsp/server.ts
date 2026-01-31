@@ -9,7 +9,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { Archive } from "../util/archive"
-import { $, which, file, write, spawn as compatSpawn, readableStreamToText, isArm } from "../compat"
+import { $, which, file, write, spawn as compatSpawn, readableStreamToText, isArm, tmpdir } from "../compat"
 
 // Helper to resolve module path (mimics Bun.resolve)
 async function resolveModule(modulePath: string, cwd: string): Promise<string | undefined> {
@@ -1226,7 +1226,7 @@ export namespace LSPServer {
           }
         })(),
       )
-      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-jdtls-data"))
+      const dataDir = await fs.mkdtemp(path.join(tmpdir, "opencode-jdtls-data"))
       return {
         process: spawn(
           java,

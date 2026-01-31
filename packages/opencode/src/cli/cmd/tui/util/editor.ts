@@ -1,16 +1,15 @@
 import { defer } from "@/util/defer"
 import { rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { CliRenderer } from "@opentui/core"
-import { file, write, spawn } from "@/compat"
+import { file, write, spawn, tmpdir } from "@/compat"
 
 export namespace Editor {
   export async function open(opts: { value: string; renderer: CliRenderer }): Promise<string | undefined> {
     const editor = process.env["VISUAL"] || process.env["EDITOR"]
     if (!editor) return
 
-    const filepath = join(tmpdir(), `${Date.now()}.md`)
+    const filepath = join(tmpdir, `${Date.now()}.md`)
     await using _ = defer(async () => rm(filepath, { force: true }))
 
     await write(filepath, opts.value)
