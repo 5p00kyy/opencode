@@ -9,7 +9,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { Archive } from "../util/archive"
-import { $, which, file, write, spawn as compatSpawn, readableStreamToText } from "../compat"
+import { $, which, file, write, spawn as compatSpawn, readableStreamToText, isArm } from "../compat"
 
 // Helper to resolve module path (mimics Bun.resolve)
 async function resolveModule(modulePath: string, cwd: string): Promise<string | undefined> {
@@ -945,6 +945,14 @@ export namespace LSPServer {
       }
 
       if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
+
+      // clangd GitHub releases only provide x86_64 binaries
+      // On ARM, user must install clangd via system package manager
+      if (isArm) {
+        log.info("clangd auto-download not available for ARM architecture - install via system package manager (e.g., apt install clangd)")
+        return
+      }
+
       log.info("downloading clangd from GitHub releases")
 
       const releaseResponse = await fetch("https://api.github.com/repos/clangd/clangd/releases/latest")

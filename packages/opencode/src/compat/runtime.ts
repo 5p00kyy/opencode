@@ -24,6 +24,21 @@ export const termuxHome = process.env.HOME || "/data/data/com.termux/files/home"
 // Temp directory - use Termux path if in Termux
 export const tmpdir = isTermux ? `${termuxPrefix}/tmp` : process.env.TMPDIR || "/tmp"
 
+// Architecture detection
+export const arch = process.arch // "arm64", "x64", "ia32", "arm", etc.
+export const isArm64 = arch === "arm64"
+export const isArm = arch === "arm" || arch === "arm64"
+export const isX64 = arch === "x64"
+
+// Platform detection
+export const platform = process.platform // "linux", "darwin", "win32", etc.
+export const isLinux = platform === "linux"
+export const isDarwin = platform === "darwin"
+export const isWindows = platform === "win32"
+
+// Combined detection for ARM Linux (Termux, Raspberry Pi, etc.)
+export const isArmLinux = isLinux && isArm
+
 export interface WhichOptions {
   PATH?: string
   cwd?: string
