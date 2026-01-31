@@ -7,6 +7,7 @@ import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
 import { Log } from "../util/log"
 import type { MessageV2 } from "./message-v2"
+import { file, Glob } from "../compat"
 
 const log = Log.create({ service: "instruction" })
 
@@ -81,9 +82,9 @@ export namespace InstructionPrompt {
       }
     }
 
-    for (const file of globalFiles()) {
-      if (await Bun.file(file).exists()) {
-        paths.add(path.resolve(file))
+    for (const f of globalFiles()) {
+      if (await file(f).exists()) {
+        paths.add(path.resolve(f))
         break
       }
     }
@@ -96,7 +97,7 @@ export namespace InstructionPrompt {
         }
         const matches = path.isAbsolute(instruction)
           ? await Array.fromAsync(
-              new Bun.Glob(path.basename(instruction)).scan({
+              new Glob(path.basename(instruction)).scan({
                 cwd: path.dirname(instruction),
                 absolute: true,
                 onlyFiles: true,
@@ -115,7 +116,7 @@ export namespace InstructionPrompt {
     const paths = await systemPaths()
 
     const files = Array.from(paths).map(async (p) => {
-      const content = await Bun.file(p)
+      const content = await file(p)
         .text()
         .catch(() => "")
       return content ? "Instructions from: " + p + "\n" + content : ""
@@ -157,9 +158,9 @@ export namespace InstructionPrompt {
   }
 
   export async function find(dir: string) {
-    for (const file of FILES) {
-      const filepath = path.resolve(path.join(dir, file))
-      if (await Bun.file(filepath).exists()) return filepath
+    for (const f of FILES) {
+      const filepath = path.resolve(path.join(dir, f))
+      if (await file(filepath).exists()) return filepath
     }
   }
 
@@ -175,7 +176,7 @@ export namespace InstructionPrompt {
       const found = await find(current)
       if (found && !system.has(found) && !already.has(found) && !isClaimed(messageID, found)) {
         claim(messageID, found)
-        const content = await Bun.file(found)
+        const content = await file(found)
           .text()
           .catch(() => undefined)
         if (content) {

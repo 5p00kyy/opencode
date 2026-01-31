@@ -1,7 +1,9 @@
 import path from "path"
 import fs from "fs/promises"
+import { appendFile, open } from "fs/promises"
 import { Global } from "../global"
 import z from "zod"
+import { Glob, file as createFile } from "../compat"
 
 export namespace Log {
   export const Level = z.enum(["DEBUG", "INFO", "WARN", "ERROR"]).meta({ ref: "LogLevel", description: "Log level" })
@@ -63,18 +65,16 @@ export namespace Log {
       Global.Path.log,
       options.dev ? "dev.log" : new Date().toISOString().split(".")[0].replace(/:/g, "") + ".log",
     )
-    const logfile = Bun.file(logpath)
     await fs.truncate(logpath).catch(() => {})
-    const writer = logfile.writer()
+    // Use appendFile for Node.js compatibility
     write = async (msg: any) => {
-      const num = writer.write(msg)
-      writer.flush()
-      return num
+      await appendFile(logpath, msg)
+      return msg.length
     }
   }
 
   async function cleanup(dir: string) {
-    const glob = new Bun.Glob("????-??-??T??????.log")
+    const glob = new Glob("????-??-??T??????.log")
     const files = await Array.fromAsync(
       glob.scan({
         cwd: dir,
@@ -84,7 +84,7 @@ export namespace Log {
     if (files.length <= 5) return
 
     const filesToDelete = files.slice(0, -10)
-    await Promise.all(filesToDelete.map((file) => fs.unlink(file).catch(() => {})))
+    await Promise.all(filesToDelete.map((f) => fs.unlink(f).catch(() => {})))
   }
 
   function formatError(error: Error, depth = 0): string {

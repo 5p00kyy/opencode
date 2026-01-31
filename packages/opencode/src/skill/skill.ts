@@ -11,6 +11,7 @@ import { Filesystem } from "@/util/filesystem"
 import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
+import { Glob } from "../compat"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -40,9 +41,9 @@ export namespace Skill {
     }),
   )
 
-  const OPENCODE_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
-  const CLAUDE_SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
-  const SKILL_GLOB = new Bun.Glob("**/SKILL.md")
+  const OPENCODE_SKILL_GLOB = new Glob("{skill,skills}/**/SKILL.md")
+  const CLAUDE_SKILL_GLOB = new Glob("skills/**/SKILL.md")
+  const SKILL_GLOB = new Glob("**/SKILL.md")
 
   export const state = Instance.state(async () => {
     const skills: Record<string, Info> = {}
