@@ -4,7 +4,7 @@ import { Log } from "../util/log"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
 import { NamedError } from "@opencode-ai/util/error"
-import { file, write, spawn, readableStreamToText, isBun } from "../compat"
+import { file, write, spawn, readableStreamToText, isBun, which as whichBin } from "../compat"
 import { createRequire } from "module"
 import { Lock } from "../util/lock"
 
@@ -12,12 +12,21 @@ export namespace BunProc {
   const log = Log.create({ service: "bun" })
   const req = createRequire(import.meta.url)
 
+  /**
+   * Run a command through the package manager runtime.
+   * On Bun: runs `bun <cmd>`
+   * On Node: runs `npm <cmd>` for package commands, `node <cmd>` for scripts
+   */
   export async function run(cmd: string[], options?: { cwd?: string; env?: Record<string, string | undefined> }) {
+    // Determine the actual command based on runtime
+    const fullCmd = isBun ? [which(), ...cmd] : buildNodeCommand(cmd)
+    
     log.info("running", {
-      cmd: [which(), ...cmd],
+      cmd: fullCmd,
+      runtime: isBun ? "bun" : "node",
       ...options,
     })
-    const result = spawn([which(), ...cmd], {
+    const result = spawn(fullCmd, {
       ...options,
       stdout: "pipe",
       stderr: "pipe",
@@ -49,9 +58,91 @@ export namespace BunProc {
     return result
   }
 
+  /**
+   * Build Node.js equivalent command for Bun commands
+   */
+  function buildNodeCommand(cmd: string[]): string[] {
+    const [subCmd, ...args] = cmd
+    
+    switch (subCmd) {
+      case "x":
+        // bun x pkg args -> npx pkg args
+        return ["npx", "--yes", ...args]
+      case "add":
+      case "install":
+        // bun add/install -> npm install
+        return ["npm", "install", ...args.filter(a => a !== "--force" && a !== "--no-cache")]
+      case "run":
+        // bun run script.js -> node script.js
+        return ["node", ...args]
+      default:
+        // For other commands, try npm
+        return ["npm", subCmd, ...args]
+    }
+  }
+
+  /**
+   * Get the runtime executable path.
+   * Returns `bun` path on Bun, `node` path on Node.js
+   */
   export function which() {
     return process.execPath
   }
+
+  /**
+   * Build command array for executing a package (like npx/bunx)
+   * Use this instead of manually building ["x", pkg, ...args]
+   */
+  export function npx(pkg: string, args: string[] = []): string[] {
+    if (isBun) {
+      return [process.execPath, "x", pkg, ...args]
+    }
+    return ["npx", "--yes", pkg, ...args]
+  }
+
+  /**
+   * Build command array for running a JavaScript file
+   */
+  export function runScript(script: string, args: string[] = []): string[] {
+    if (isBun) {
+      return [process.execPath, "run", script, ...args]
+    }
+    return ["node", script, ...args]
+  }
+
+  /**
+   * Build command array for installing a package to a directory
+   */
+  export function npmInstall(pkg: string, options?: { cwd?: string; global?: boolean }): string[] {
+    if (isBun) {
+      const args = ["install"]
+      if (options?.global) args.push("-g")
+      args.push(pkg)
+      return [process.execPath, ...args]
+    }
+    const args = ["install"]
+    if (options?.global) args.push("-g")
+    args.push(pkg)
+    return ["npm", ...args]
+  }
+
+  /**
+   * Get binary and args for running a JS script.
+   * Returns [binary, ...args] where:
+   * - On Bun: ["bun", "run", script, ...extraArgs]
+   * - On Node: ["node", script, ...extraArgs]
+   */
+  export function scriptCommand(script: string, extraArgs: string[] = []): { binary: string; args: string[] } {
+    if (isBun) {
+      return { binary: process.execPath, args: ["run", script, ...extraArgs] }
+    }
+    return { binary: "node", args: [script, ...extraArgs] }
+  }
+
+  /**
+   * Check if we're running on Bun
+   */
+  export const runningOnBun = isBun
 
   export const InstallFailedError = NamedError.create(
     "BunInstallFailedError",

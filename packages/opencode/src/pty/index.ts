@@ -1,6 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
-import { type IPty } from "bun-pty"
+import { getPtySpawn, type IPty } from "@/compat"
 import z from "zod"
 import { Identifier } from "../id/id"
 import { Log } from "../util/log"
@@ -16,7 +16,10 @@ export namespace Pty {
   const BUFFER_CHUNK = 64 * 1024
 
   const pty = lazy(async () => {
-    const { spawn } = await import("bun-pty")
+    const spawn = await getPtySpawn()
+    if (!spawn) {
+      throw new Error("PTY not available - terminal features disabled")
+    }
     return spawn
   })
 

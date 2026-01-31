@@ -10,7 +10,7 @@ import { Storage } from "@/storage/storage"
 import { ProviderTransform } from "@/provider/transform"
 import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
-import { type SystemError } from "bun"
+import { type SystemError } from "../compat"
 import type { Provider } from "@/provider/provider"
 
 export namespace MessageV2 {

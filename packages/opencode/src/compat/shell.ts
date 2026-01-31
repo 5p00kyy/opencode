@@ -105,6 +105,7 @@ class NodeShellResult implements ShellResult {
 export interface ShellPromise extends Promise<ShellResult> {
   quiet(): ShellPromise
   nothrow(): ShellPromise
+  throws(shouldThrow: boolean): ShellPromise
   cwd(dir: string): ShellPromise
   env(vars: Record<string, string | undefined>): ShellPromise
   text(): Promise<string>
@@ -183,6 +184,7 @@ export function $(strings: TemplateStringsArray, ...values: unknown[]): ShellPro
     // Add chainable methods
     executePromise.quiet = () => createPromise({ ...opts, quiet: true })
     executePromise.nothrow = () => createPromise({ ...opts, nothrow: true })
+    executePromise.throws = (shouldThrow: boolean) => createPromise({ ...opts, nothrow: !shouldThrow })
     executePromise.cwd = (dir: string) => createPromise({ ...opts, cwd: dir })
     executePromise.env = (vars: Record<string, string | undefined>) => createPromise({ ...opts, env: { ...opts.env, ...vars } })
     executePromise.text = async () => (await executePromise).text()

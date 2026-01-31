@@ -1,6 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
-import { spawn } from "bun"
+import { spawn, readableStreamToText } from "../compat"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
 import { Log } from "../util/log"
@@ -57,8 +57,8 @@ export namespace Ide {
       stderr: "pipe",
     })
     await p.exited
-    const stdout = await new Response(p.stdout).text()
-    const stderr = await new Response(p.stderr).text()
+    const stdout = p.stdout ? await readableStreamToText(p.stdout) : ""
+    const stderr = p.stderr ? await readableStreamToText(p.stderr) : ""
 
     log.info("installed", {
       ide,

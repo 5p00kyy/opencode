@@ -107,11 +107,12 @@ export namespace LSPServer {
       const tsserver = await resolveModule("typescript/lib/tsserver.js", Instance.directory).catch(() => {})
       log.info("typescript server", { tsserver })
       if (!tsserver) return
-      const proc = spawn(BunProc.which(), ["x", "typescript-language-server", "--stdio"], {
+      const npxCmd = BunProc.npx("typescript-language-server", ["--stdio"])
+      const proc = spawn(npxCmd[0], npxCmd.slice(1), {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -143,26 +144,27 @@ export namespace LSPServer {
         )
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "@vue/language-server"], {
+          await compatSpawn(BunProc.npmInstall("@vue/language-server"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args) // Includes script path and any prefix args (like "run" on Bun)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -218,11 +220,12 @@ export namespace LSPServer {
         log.info("installed VS Code ESLint server", { serverPath })
       }
 
-      const proc = spawn(BunProc.which(), [serverPath, "--stdio"], {
+      const scriptCmd = BunProc.scriptCommand(serverPath, ["--stdio"])
+      const proc = spawn(scriptCmd.binary, scriptCmd.args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
 
@@ -347,15 +350,16 @@ export namespace LSPServer {
       if (!bin) {
         const resolved = await resolveModule("biome", root).catch(() => undefined)
         if (!resolved) return
-        bin = BunProc.which()
-        args = ["x", "biome", "lsp-proxy", "--stdio"]
+        const npxCmd = BunProc.npx("biome", ["lsp-proxy", "--stdio"])
+        bin = npxCmd[0]
+        args = npxCmd.slice(1)
       }
 
       const proc = spawn(bin, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
 
@@ -518,21 +522,22 @@ export namespace LSPServer {
     root: NearestRoot(["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"]),
     async spawn(root) {
       let binary = which("pyright-langserver")
-      const args = []
+      const args: string[] = []
       if (!binary) {
         const js = path.join(Global.Path.bin, "node_modules", "pyright", "dist", "pyright-langserver.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "pyright"], {
+          await compatSpawn(BunProc.npmInstall("pyright"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
           }).exited
         }
-        binary = BunProc.which()
-        args.push(...["run", js])
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
 
@@ -1057,26 +1062,27 @@ export namespace LSPServer {
         const js = path.join(Global.Path.bin, "node_modules", "svelte-language-server", "bin", "server.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "svelte-language-server"], {
+          await compatSpawn(BunProc.npmInstall("svelte-language-server"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -1104,26 +1110,27 @@ export namespace LSPServer {
         const js = path.join(Global.Path.bin, "node_modules", "@astrojs", "language-server", "bin", "nodeServer.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "@astrojs/language-server"], {
+          await compatSpawn(BunProc.npmInstall("@astrojs/language-server"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -1349,26 +1356,27 @@ export namespace LSPServer {
         const exists = await file(js).exists()
         if (!exists) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "yaml-language-server"], {
+          await compatSpawn(BunProc.npmInstall("yaml-language-server"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -1528,26 +1536,27 @@ export namespace LSPServer {
         const js = path.join(Global.Path.bin, "node_modules", "intelephense", "lib", "intelephense.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "intelephense"], {
+          await compatSpawn(BunProc.npmInstall("intelephense"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -1625,26 +1634,27 @@ export namespace LSPServer {
         const js = path.join(Global.Path.bin, "node_modules", "bash-language-server", "out", "cli.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "bash-language-server"], {
+          await compatSpawn(BunProc.npmInstall("bash-language-server"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("start")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {
@@ -1844,26 +1854,27 @@ export namespace LSPServer {
         const js = path.join(Global.Path.bin, "node_modules", "dockerfile-language-server-nodejs", "lib", "server.js")
         if (!(await file(js).exists())) {
           if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          await compatSpawn([BunProc.which(), "install", "dockerfile-language-server-nodejs"], {
+          await compatSpawn(BunProc.npmInstall("dockerfile-language-server-nodejs"), {
             cwd: Global.Path.bin,
             env: {
               ...process.env,
-              BUN_BE_BUN: "1",
+              ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
             },
             stdout: "pipe",
             stderr: "pipe",
             stdin: "pipe",
           }).exited
         }
-        binary = BunProc.which()
-        args.push("run", js)
+        const scriptCmd = BunProc.scriptCommand(js)
+        binary = scriptCmd.binary
+        args.push(...scriptCmd.args)
       }
       args.push("--stdio")
       const proc = spawn(binary, args, {
         cwd: root,
         env: {
           ...process.env,
-          BUN_BE_BUN: "1",
+          ...(BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {}),
         },
       })
       return {

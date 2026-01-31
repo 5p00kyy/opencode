@@ -14,7 +14,7 @@
  */
 
 // Runtime detection and utilities
-export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep, hash, stdin, stderr, stdout, color } from "./runtime"
+export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep, hash, stdin, stderr, stdout, color, type SystemError } from "./runtime"
 
 // File operations (replaces Bun.file, Bun.write)
 export { file, write, type FileHandle } from "./file"
@@ -33,3 +33,6 @@ export { readableStreamToText, readableStreamToArrayBuffer, readableStreamToBlob
 
 // HTTP Server (replaces Bun.serve)
 export { serve, serveSimple, type ServeOptions, type ServerInstance, type ServerHandle } from "./serve"
+
+// PTY (abstracts bun-pty and node-pty)
+export { getPtySpawn, isPtyAvailable, getPtyError, type IPty, type PtySpawnOptions, type PtySpawnFn } from "./pty"

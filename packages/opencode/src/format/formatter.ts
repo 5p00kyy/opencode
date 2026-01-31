@@ -32,10 +32,8 @@ export const mix: Info = {
 
 export const prettier: Info = {
   name: "prettier",
-  command: [BunProc.which(), "x", "prettier", "--write", "$FILE"],
-  environment: {
-    BUN_BE_BUN: "1",
-  },
+  command: BunProc.npx("prettier", ["--write", "$FILE"]),
+  environment: BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {},
   extensions: [
     ".js",
     ".jsx",
@@ -77,10 +75,8 @@ export const prettier: Info = {
 
 export const oxfmt: Info = {
   name: "oxfmt",
-  command: [BunProc.which(), "x", "oxfmt", "$FILE"],
-  environment: {
-    BUN_BE_BUN: "1",
-  },
+  command: BunProc.npx("oxfmt", ["$FILE"]),
+  environment: BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {},
   extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
   async enabled() {
     if (!Flag.OPENCODE_EXPERIMENTAL_OXFMT) return false
@@ -96,10 +92,8 @@ export const oxfmt: Info = {
 
 export const biome: Info = {
   name: "biome",
-  command: [BunProc.which(), "x", "@biomejs/biome", "check", "--write", "$FILE"],
-  environment: {
-    BUN_BE_BUN: "1",
-  },
+  command: BunProc.npx("@biomejs/biome", ["check", "--write", "$FILE"]),
+  environment: BunProc.runningOnBun ? { BUN_BE_BUN: "1" } : {},
   extensions: [
     ".js",
     ".jsx",

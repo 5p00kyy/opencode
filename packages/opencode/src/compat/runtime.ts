@@ -162,3 +162,14 @@ export function color(name: string, format: "ansi" | "css" = "ansi"): string | n
   // CSS format - return simple color name
   return name
 }
+
+/**
+ * SystemError type compatible with both Bun and Node.js
+ * Used for handling system-level errors like ECONNRESET, ENOENT, etc.
+ */
+export interface SystemError extends Error {
+  code?: string
+  syscall?: string
+  errno?: number
+  path?: string
+}

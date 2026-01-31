@@ -1,6 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import path from "path"
-import { $ } from "bun"
+import { $ } from "../compat"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
 import { Log } from "../util/log"
@@ -165,7 +165,7 @@ export namespace Installation {
     }
     const result = await cmd.quiet().throws(false)
     if (result.exitCode !== 0) {
-      const stderr = method === "choco" ? "not running from an elevated command shell" : result.stderr.toString("utf8")
+      const stderr = method === "choco" ? "not running from an elevated command shell" : result.stderr
       throw new UpgradeFailedError({
         stderr: stderr,
       })
@@ -173,8 +173,8 @@ export namespace Installation {
     log.info("upgraded", {
       method,
       target,
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
+      stdout: result.stdout,
+      stderr: result.stderr,
     })
     await $`${process.execPath} --version`.nothrow().quiet().text()
   }
