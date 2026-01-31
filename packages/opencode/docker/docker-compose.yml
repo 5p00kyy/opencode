@@ -1,0 +1,53 @@
+# OpenCode Node.js Compatibility Testing
+#
+# Test on native architecture:
+#   docker-compose up --build
+#
+# Test on ARM64 (using QEMU emulation):
+#   docker-compose -f docker-compose.yml -f docker-compose.arm64.yml up --build
+
+version: '3.8'
+
+services:
+  opencode-node:
+    build:
+      context: ../..
+      dockerfile: packages/opencode/docker/Dockerfile.node
+    container_name: opencode-node-test
+    environment:
+      - OPENCODE_RUNTIME=node
+      - NODE_ENV=development
+    volumes:
+      - ../../:/app:ro
+    working_dir: /app/packages/opencode
+    command: >
+      sh -c "
+        echo '=== OpenCode Node.js Compat Layer Test ===' &&
+        echo 'Node version:' && node --version &&
+        echo '' &&
+        echo 'Testing compat layer...' &&
+        node --experimental-strip-types -e \"
+          import { isBun, isNode, runtime, arch, platform, isArm64 } from './src/compat/index.ts';
+          console.log('Runtime detection:', { isBun, isNode, runtime });
+          console.log('Platform info:', { arch, platform, isArm64 });
+        \" &&
+        echo '' &&
+        echo 'Testing file operations...' &&
+        node --experimental-strip-types -e \"
+          import { file, write } from './src/compat/index.ts';
+          import { tmpdir } from 'os';
+          const testPath = tmpdir() + '/opencode-test.txt';
+          await write(testPath, 'Hello from OpenCode compat layer!');
+          const content = await file(testPath).text();
+          console.log('File write/read test:', content);
+        \" &&
+        echo '' &&
+        echo 'Testing shell operations...' &&
+        node --experimental-strip-types -e \"
+          import { \\$ } from './src/compat/index.ts';
+          const result = await \\$\\\"echo 'Shell compat test passed'\\\"
+          console.log('Shell output:', result.stdout);
+        \" &&
+        echo '' &&
+        echo '=== All tests passed! ==='
+      "

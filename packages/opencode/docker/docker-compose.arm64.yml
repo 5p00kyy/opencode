@@ -1,0 +1,14 @@
+# ARM64 Override for OpenCode Node.js Compatibility Testing
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.arm64.yml up --build
+#
+# Requires Docker buildx with QEMU emulation:
+#   docker run --privileged --rm tonistiigi/binfmt --install arm64
+
+version: '3.8'
+
+services:
+  opencode-node:
+    platform: linux/arm64
+    container_name: opencode-node-arm64-test

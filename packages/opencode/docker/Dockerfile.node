@@ -1,0 +1,49 @@
+# OpenCode Node.js Compatibility Test Image
+# Simulates Termux-like environment for testing the compat layer
+#
+# Build: docker build -f docker/Dockerfile.node -t opencode-node .
+# Run:   docker run -it opencode-node
+#
+# For ARM64 testing on x86_64:
+#   docker buildx build --platform linux/arm64 -f docker/Dockerfile.node -t opencode-node-arm64 .
+
+FROM node:22-slim
+
+LABEL maintainer="OpenCode Contributors"
+LABEL description="OpenCode Node.js compatibility testing environment"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    python3 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment to simulate Termux-like conditions
+ENV OPENCODE_RUNTIME=node
+ENV NODE_ENV=development
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package.json ./
+COPY packages/opencode/package.json ./packages/opencode/
+COPY packages/util/package.json ./packages/util/
+
+# Install dependencies
+RUN npm install --ignore-scripts
+
+# Copy source code
+COPY . .
+
+# Build the project (skip Bun-specific scripts)
+WORKDIR /app/packages/opencode
+
+# Verify Node.js compat layer works
+RUN echo "Testing Node.js compatibility layer..." && \
+    node --experimental-strip-types -e "import { isBun, isNode, runtime } from './src/compat/index.ts'; console.log({ isBun, isNode, runtime })"
+
+# Default command - run OpenCode
+CMD ["node", "--experimental-strip-types", "./src/index.ts"]
