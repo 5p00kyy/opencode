@@ -13,8 +13,8 @@
  *   Bun.write(path, data)
  */
 
-// Runtime detection
-export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir } from "./runtime"
+// Runtime detection and utilities
+export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep } from "./runtime"
 
 // File operations (replaces Bun.file, Bun.write)
 export { file, write, type FileHandle } from "./file"

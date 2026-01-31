@@ -5,7 +5,7 @@ import fs from "fs/promises"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
 import { lazy } from "../util/lazy"
-import { $ } from "../compat"
+import { $, file, write, spawn, readableStreamToText, which } from "../compat"
 
 import { ZipReader, BlobReader, BlobWriter } from "@zip.js/zip.js"
 import { Log } from "@/util/log"
@@ -123,12 +123,12 @@ export namespace Ripgrep {
   )
 
   const state = lazy(async () => {
-    let filepath = Bun.which("rg")
+    let filepath = which("rg")
     if (filepath) return { filepath }
     filepath = path.join(Global.Path.bin, "rg" + (process.platform === "win32" ? ".exe" : ""))
 
-    const file = Bun.file(filepath)
-    if (!(await file.exists())) {
+    const rgFile = file(filepath)
+    if (!(await rgFile.exists())) {
       const platformKey = `${process.arch}-${process.platform}` as keyof typeof PLATFORM
       const config = PLATFORM[platformKey]
       if (!config) throw new UnsupportedPlatformError({ platform: platformKey })
@@ -142,14 +142,14 @@ export namespace Ripgrep {
 
       const buffer = await response.arrayBuffer()
       const archivePath = path.join(Global.Path.bin, filename)
-      await Bun.write(archivePath, buffer)
+      await write(archivePath, new Uint8Array(buffer))
       if (config.extension === "tar.gz") {
         const args = ["tar", "-xzf", archivePath, "--strip-components=1"]
 
         if (platformKey.endsWith("-darwin")) args.push("--include=*/rg")
         if (platformKey.endsWith("-linux")) args.push("--wildcards", "*/rg")
 
-        const proc = Bun.spawn(args, {
+        const proc = spawn(args, {
           cwd: Global.Path.bin,
           stderr: "pipe",
           stdout: "pipe",
@@ -158,11 +158,11 @@ export namespace Ripgrep {
         if (proc.exitCode !== 0)
           throw new ExtractionFailedError({
             filepath,
-            stderr: await Bun.readableStreamToText(proc.stderr),
+            stderr: await readableStreamToText(proc.stderr),
           })
       }
       if (config.extension === "zip") {
-        const zipFileReader = new ZipReader(new BlobReader(new Blob([await Bun.file(archivePath).arrayBuffer()])))
+        const zipFileReader = new ZipReader(new BlobReader(new Blob([await file(archivePath).arrayBuffer()])))
         const entries = await zipFileReader.getEntries()
         let rgEntry: any
         for (const entry of entries) {
@@ -186,7 +186,7 @@ export namespace Ripgrep {
             stderr: "Failed to extract rg.exe from zip archive",
           })
         }
-        await Bun.write(filepath, await rgBlob.arrayBuffer())
+        await write(filepath, new Uint8Array(await rgBlob.arrayBuffer()))
         await zipFileReader.close()
       }
       await fs.unlink(archivePath)
@@ -223,8 +223,7 @@ export namespace Ripgrep {
       }
     }
 
-    // Bun.spawn should throw this, but it incorrectly reports that the executable does not exist.
-    // See https://github.com/oven-sh/bun/issues/24012
+    // Verify directory exists before spawning
     if (!(await fs.stat(input.cwd).catch(() => undefined))?.isDirectory()) {
       throw Object.assign(new Error(`No such file or directory: '${input.cwd}'`), {
         code: "ENOENT",
@@ -233,12 +232,10 @@ export namespace Ripgrep {
       })
     }
 
-    const proc = Bun.spawn(args, {
+    const proc = spawn(args, {
       cwd: input.cwd,
       stdout: "pipe",
       stderr: "ignore",
-      maxBuffer: 1024 * 1024 * 20,
-      signal: input.signal,
     })
 
     const reader = proc.stdout.getReader()

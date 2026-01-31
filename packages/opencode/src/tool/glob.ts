@@ -5,6 +5,7 @@ import DESCRIPTION from "./glob.txt"
 import { Ripgrep } from "../file/ripgrep"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+import { file } from "../compat"
 
 export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
@@ -35,7 +36,7 @@ export const GlobTool = Tool.define("glob", {
     const limit = 100
     const files = []
     let truncated = false
-    for await (const file of Ripgrep.files({
+    for await (const filePath of Ripgrep.files({
       cwd: search,
       glob: [params.pattern],
       signal: ctx.abort,
@@ -44,8 +45,8 @@ export const GlobTool = Tool.define("glob", {
         truncated = true
         break
       }
-      const full = path.resolve(search, file)
-      const stats = await Bun.file(full)
+      const full = path.resolve(search, filePath)
+      const stats = await file(full)
         .stat()
         .then((x) => x.mtime.getTime())
         .catch(() => 0)
