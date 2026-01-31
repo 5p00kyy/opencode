@@ -1,6 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
-import { $ } from "bun"
+import { $ } from "../compat"
 import path from "path"
 import z from "zod"
 import { Log } from "@/util/log"

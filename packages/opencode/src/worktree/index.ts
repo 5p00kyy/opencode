@@ -1,4 +1,4 @@
-import { $ } from "bun"
+import { $ } from "../compat"
 import fs from "fs/promises"
 import path from "path"
 import z from "zod"

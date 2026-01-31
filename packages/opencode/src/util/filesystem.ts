@@ -1,15 +1,16 @@
 import { realpathSync } from "fs"
 import { dirname, join, relative } from "path"
+import { file, Glob } from "../compat"
 
 export namespace Filesystem {
   export const exists = (p: string) =>
-    Bun.file(p)
+    file(p)
       .stat()
       .then(() => true)
       .catch(() => false)
 
   export const isDir = (p: string) =>
-    Bun.file(p)
+    file(p)
       .stat()
       .then((s) => s.isDirectory())
       .catch(() => false)
@@ -70,7 +71,7 @@ export namespace Filesystem {
     const result = []
     while (true) {
       try {
-        const glob = new Bun.Glob(pattern)
+        const glob = new Glob(pattern)
         for await (const match of glob.scan({
           cwd: current,
           absolute: true,

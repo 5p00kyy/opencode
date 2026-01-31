@@ -4,7 +4,7 @@ import { Log } from "../util/log"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
 import { NamedError } from "@opencode-ai/util/error"
-import { readableStreamToText } from "bun"
+import { file, write, spawn, readableStreamToText, isBun } from "../compat"
 import { createRequire } from "module"
 import { Lock } from "../util/lock"
 
@@ -12,19 +12,19 @@ export namespace BunProc {
   const log = Log.create({ service: "bun" })
   const req = createRequire(import.meta.url)
 
-  export async function run(cmd: string[], options?: Bun.SpawnOptions.OptionsObject<any, any, any>) {
+  export async function run(cmd: string[], options?: { cwd?: string; env?: Record<string, string | undefined> }) {
     log.info("running", {
       cmd: [which(), ...cmd],
       ...options,
     })
-    const result = Bun.spawn([which(), ...cmd], {
+    const result = spawn([which(), ...cmd], {
       ...options,
       stdout: "pipe",
       stderr: "pipe",
       env: {
         ...process.env,
         ...options?.env,
-        BUN_BE_BUN: "1",
+        ...(isBun ? { BUN_BE_BUN: "1" } : {}),
       },
     })
     const code = await result.exited
@@ -44,7 +44,7 @@ export namespace BunProc {
       stderr,
     })
     if (code !== 0) {
-      throw new Error(`Command failed with exit code ${result.exitCode}`)
+      throw new Error(`Command failed with exit code ${code}`)
     }
     return result
   }
@@ -66,10 +66,11 @@ export namespace BunProc {
     using _ = await Lock.write("bun-install")
 
     const mod = path.join(Global.Path.cache, "node_modules", pkg)
-    const pkgjson = Bun.file(path.join(Global.Path.cache, "package.json"))
+    const pkgjsonPath = path.join(Global.Path.cache, "package.json")
+    const pkgjson = file(pkgjsonPath)
     const parsed = await pkgjson.json().catch(async () => {
       const result = { dependencies: {} }
-      await Bun.write(pkgjson.name!, JSON.stringify(result, null, 2))
+      await write(pkgjsonPath, JSON.stringify(result, null, 2))
       return result
     })
     const dependencies = parsed.dependencies ?? {}
@@ -84,25 +85,23 @@ export namespace BunProc {
       process.env.https_proxy
     )
 
-    // Build command arguments
-    const args = [
-      "add",
-      "--force",
-      "--exact",
-      // TODO: get rid of this case (see: https://github.com/oven-sh/bun/issues/19936)
-      ...(proxied ? ["--no-cache"] : []),
-      "--cwd",
-      Global.Path.cache,
-      pkg + "@" + version,
-    ]
+    // Build command arguments - use npm on Node.js, bun add on Bun
+    const args = isBun
+      ? [
+          "add",
+          "--force",
+          "--exact",
+          ...(proxied ? ["--no-cache"] : []),
+          "--cwd",
+          Global.Path.cache,
+          pkg + "@" + version,
+        ]
+      : ["install", "--save-exact", pkg + "@" + version]
 
-    // Let Bun handle registry resolution:
-    // - If .npmrc files exist, Bun will use them automatically
-    // - If no .npmrc files exist, Bun will default to https://registry.npmjs.org
-    // - No need to pass --registry flag
-    log.info("installing package using Bun's default registry resolution", {
+    log.info("installing package", {
       pkg,
       version,
+      runtime: isBun ? "bun" : "node",
     })
 
     await BunProc.run(args, {
@@ -117,10 +116,9 @@ export namespace BunProc {
     })
 
     // Resolve actual version from installed package when using "latest"
-    // This ensures subsequent starts use the cached version until explicitly updated
     let resolvedVersion = version
     if (version === "latest") {
-      const installedPkgJson = Bun.file(path.join(mod, "package.json"))
+      const installedPkgJson = file(path.join(mod, "package.json"))
       const installedPkg = await installedPkgJson.json().catch(() => null)
       if (installedPkg?.version) {
         resolvedVersion = installedPkg.version
@@ -128,7 +126,7 @@ export namespace BunProc {
     }
 
     parsed.dependencies[pkg] = resolvedVersion
-    await Bun.write(pkgjson.name!, JSON.stringify(parsed, null, 2))
+    await write(pkgjsonPath, JSON.stringify(parsed, null, 2))
     return mod
   }
 }

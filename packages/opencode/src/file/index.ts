@@ -1,7 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import z from "zod"
-import { $ } from "bun"
-import type { BunFile } from "bun"
+import { $, file, type FileHandle } from "../compat"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import fs from "fs"
@@ -73,8 +72,8 @@ export namespace File {
     })
   export type Content = z.infer<typeof Content>
 
-  async function shouldEncode(file: BunFile): Promise<boolean> {
-    const type = file.type?.toLowerCase()
+  async function shouldEncode(f: FileHandle): Promise<boolean> {
+    const type = (f as any).type?.toLowerCase()
     log.info("shouldEncode", { type })
     if (!type) return false
 
@@ -237,7 +236,7 @@ export namespace File {
       const untrackedFiles = untrackedOutput.trim().split("\n")
       for (const filepath of untrackedFiles) {
         try {
-          const content = await Bun.file(path.join(Instance.directory, filepath)).text()
+          const content = await file(path.join(Instance.directory, filepath)).text()
           const lines = content.split("\n").length
           changedFiles.push({
             path: filepath,
@@ -287,22 +286,22 @@ export namespace File {
       throw new Error(`Access denied: path escapes project directory`)
     }
 
-    const bunFile = Bun.file(full)
+    const theFile = file(full)
 
-    if (!(await bunFile.exists())) {
+    if (!(await theFile.exists())) {
       return { type: "text", content: "" }
     }
 
-    const encode = await shouldEncode(bunFile)
+    const encode = await shouldEncode(theFile)
 
     if (encode) {
-      const buffer = await bunFile.arrayBuffer().catch(() => new ArrayBuffer(0))
+      const buffer = await theFile.arrayBuffer().catch(() => new ArrayBuffer(0))
       const content = Buffer.from(buffer).toString("base64")
-      const mimeType = bunFile.type || "application/octet-stream"
+      const mimeType = (theFile as any).type || "application/octet-stream"
       return { type: "text", content, mimeType, encoding: "base64" }
     }
 
-    const content = await bunFile
+    const content = await theFile
       .text()
       .catch(() => "")
       .then((x) => x.trim())
@@ -329,11 +328,11 @@ export namespace File {
     let ignored = (_: string) => false
     if (project.vcs === "git") {
       const ig = ignore()
-      const gitignore = Bun.file(path.join(Instance.worktree, ".gitignore"))
+      const gitignore = file(path.join(Instance.worktree, ".gitignore"))
       if (await gitignore.exists()) {
         ig.add(await gitignore.text())
       }
-      const ignoreFile = Bun.file(path.join(Instance.worktree, ".ignore"))
+      const ignoreFile = file(path.join(Instance.worktree, ".ignore"))
       if (await ignoreFile.exists()) {
         ig.add(await ignoreFile.text())
       }

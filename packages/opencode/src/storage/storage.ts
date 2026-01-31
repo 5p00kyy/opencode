@@ -5,7 +5,7 @@ import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
 import { lazy } from "../util/lazy"
 import { Lock } from "../util/lock"
-import { $ } from "bun"
+import { $, Glob } from "../compat"
 import { NamedError } from "@opencode-ai/util/error"
 import z from "zod"
 
@@ -25,7 +25,7 @@ export namespace Storage {
     async (dir) => {
       const project = path.resolve(dir, "../project")
       if (!(await Filesystem.isDir(project))) return
-      for await (const projectDir of new Bun.Glob("*").scan({
+      for await (const projectDir of new Glob("*").scan({
         cwd: project,
         onlyFiles: false,
       })) {
@@ -35,11 +35,12 @@ export namespace Storage {
         let worktree = "/"
 
         if (projectID !== "global") {
-          for await (const msgFile of new Bun.Glob("storage/session/message/*/*.json").scan({
+          for await (const msgFile of new Glob("storage/session/message/*/*.json").scan({
             cwd: path.join(project, projectDir),
             absolute: true,
           })) {
-            const json = await Bun.file(msgFile).json()
+            const { file } = await import("../compat")
+            const json = await file(msgFile).json()
             worktree = json.path?.root
             if (worktree) break
           }

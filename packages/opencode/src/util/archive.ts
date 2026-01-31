@@ -1,4 +1,4 @@
-import { $ } from "bun"
+import { $ } from "../compat"
 import path from "path"
 
 export namespace Archive {
