@@ -24,16 +24,22 @@ export const termuxHome = process.env.HOME || "/data/data/com.termux/files/home"
 // Temp directory - use Termux path if in Termux
 export const tmpdir = isTermux ? `${termuxPrefix}/tmp` : process.env.TMPDIR || "/tmp"
 
+export interface WhichOptions {
+  PATH?: string
+  cwd?: string
+}
+
 /**
  * Find executable in PATH - works like Bun.which()
  */
-export function which(name: string): string | null {
+export function which(name: string, options?: WhichOptions): string | null {
   if (isBun) {
-    return (globalThis as any).Bun.which(name)
+    return (globalThis as any).Bun.which(name, options)
   }
 
   // Node.js implementation
-  const paths = (process.env.PATH || "").split(process.platform === "win32" ? ";" : ":")
+  const pathEnv = options?.PATH ?? process.env.PATH ?? ""
+  const paths = pathEnv.split(process.platform === "win32" ? ";" : ":")
   const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".com", ""] : [""]
 
   for (const dir of paths) {

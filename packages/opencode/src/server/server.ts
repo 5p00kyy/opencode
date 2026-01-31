@@ -33,13 +33,16 @@ import { lazy } from "../util/lazy"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { Storage } from "../storage/storage"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
-import { websocket } from "hono/bun"
 import { HTTPException } from "hono/http-exception"
 import { errors } from "./error"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { MDNS } from "./mdns"
+import { isBun, serve } from "../compat"
+
+// Conditional websocket import - only available in Bun
+const websocket = isBun ? (await import("hono/bun")).websocket : undefined
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -560,23 +563,32 @@ export namespace Server {
     return result
   }
 
-  export function listen(opts: { port: number; hostname: string; mdns?: boolean; cors?: string[] }) {
+  export async function listen(opts: { port: number; hostname: string; mdns?: boolean; cors?: string[] }) {
     _corsWhitelist = opts.cors ?? []
 
-    const args = {
-      hostname: opts.hostname,
-      idleTimeout: 0,
-      fetch: App().fetch,
-      websocket: websocket,
-    } as const
-    const tryServe = (port: number) => {
+    const tryServe = async (port: number) => {
       try {
-        return Bun.serve({ ...args, port })
+        if (isBun) {
+          const args = {
+            hostname: opts.hostname,
+            idleTimeout: 0,
+            fetch: App().fetch,
+            ...(websocket && { websocket }),
+            port,
+          }
+          return (globalThis as any).Bun.serve(args)
+        }
+        // Node.js fallback using our compat serve (no websocket support)
+        return await serve({
+          hostname: opts.hostname,
+          fetch: App().fetch,
+          port,
+        })
       } catch {
         return undefined
       }
     }
-    const server = opts.port === 0 ? (tryServe(4096) ?? tryServe(0)) : tryServe(opts.port)
+    const server = opts.port === 0 ? ((await tryServe(4096)) ?? (await tryServe(0))) : await tryServe(opts.port)
     if (!server) throw new Error(`Failed to start server on port ${opts.port}`)
 
     _url = server.url

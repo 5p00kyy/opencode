@@ -35,7 +35,7 @@ export namespace Plugin {
       worktree: Instance.worktree,
       directory: Instance.directory,
       serverUrl: Server.url(),
-      $,
+      $: $ as any, // Cast for Node.js compatibility - plugins using advanced shell features may not work
     }
 
     for (const plugin of INTERNAL_PLUGINS) {

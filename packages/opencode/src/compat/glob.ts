@@ -7,12 +7,27 @@ import { isBun } from "./runtime"
 
 // Dynamic import for glob package on Node.js
 let nodeGlob: typeof import("glob") | null = null
+let nodeMinimatch: typeof import("minimatch") | null = null
 
 async function getNodeGlob() {
   if (!nodeGlob) {
     nodeGlob = await import("glob")
   }
   return nodeGlob
+}
+
+// Synchronously initialize minimatch for match() method
+function getMinimatch() {
+  if (!nodeMinimatch) {
+    // We need to preload this for sync matching
+    try {
+      nodeMinimatch = require("minimatch")
+    } catch {
+      // Fallback to a simple pattern matcher
+      return null
+    }
+  }
+  return nodeMinimatch
 }
 
 export interface GlobScanOptions {
@@ -48,15 +63,35 @@ export class Glob {
     }
   }
 
-  async match(path: string): Promise<boolean> {
+  /**
+   * Synchronous match - returns boolean like Bun.Glob.match
+   */
+  match(path: string): boolean {
     if (isBun) {
       const bunGlob = new (globalThis as any).Bun.Glob(this.pattern)
       return bunGlob.match(path)
     }
 
     // Node.js implementation using minimatch
-    const { minimatch } = await import("minimatch")
-    return minimatch(path, this.pattern)
+    const mm = getMinimatch()
+    if (mm) {
+      return mm.minimatch(path, this.pattern)
+    }
+    
+    // Simple fallback matcher for basic patterns
+    const regex = this.patternToRegex(this.pattern)
+    return regex.test(path)
+  }
+
+  private patternToRegex(pattern: string): RegExp {
+    // Convert glob pattern to regex
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // Escape special regex chars except * and ?
+      .replace(/\*\*/g, "{{GLOBSTAR}}")       // Placeholder for **
+      .replace(/\*/g, "[^/]*")                // * matches anything except /
+      .replace(/\?/g, "[^/]")                 // ? matches single char except /
+      .replace(/{{GLOBSTAR}}/g, ".*")         // ** matches anything including /
+    return new RegExp(`^${escaped}$`)
   }
 }
 

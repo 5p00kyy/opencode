@@ -2,7 +2,7 @@ import z from "zod"
 import fs from "fs/promises"
 import { Filesystem } from "../util/filesystem"
 import path from "path"
-import { $ } from "../compat"
+import { $, which, file, write, Glob } from "../compat"
 import { Storage } from "../storage/storage"
 import { Log } from "../util/log"
 import { Flag } from "@/flag/flag"
@@ -60,10 +60,10 @@ export namespace Project {
       if (git) {
         let sandbox = path.dirname(git)
 
-        const gitBinary = Bun.which("git")
+        const gitBinary = which("git")
 
         // cached id calculation
-        let id = await Bun.file(path.join(git, "opencode"))
+        let id = await file(path.join(git, "opencode"))
           .text()
           .then((x) => x.trim())
           .catch(() => undefined)
@@ -104,8 +104,7 @@ export namespace Project {
 
           id = roots[0]
           if (id) {
-            void Bun.file(path.join(git, "opencode"))
-              .write(id)
+            void write(path.join(git, "opencode"), id)
               .catch(() => undefined)
           }
         }
@@ -222,7 +221,7 @@ export namespace Project {
     if (input.vcs !== "git") return
     if (input.icon?.override) return
     if (input.icon?.url) return
-    const glob = new Bun.Glob("**/{favicon}.{ico,png,svg,jpg,jpeg,webp}")
+    const glob = new Glob("**/{favicon}.{ico,png,svg,jpg,jpeg,webp}")
     const matches = await Array.fromAsync(
       glob.scan({
         cwd: input.worktree,
@@ -234,10 +233,10 @@ export namespace Project {
     )
     const shortest = matches.sort((a, b) => a.length - b.length)[0]
     if (!shortest) return
-    const file = Bun.file(shortest)
-    const buffer = await file.arrayBuffer()
+    const f = file(shortest)
+    const buffer = await f.arrayBuffer()
     const base64 = Buffer.from(buffer).toString("base64")
-    const mime = file.type || "image/png"
+    const mime = f.type || "image/png"
     const url = `data:${mime};base64,${base64}`
     await update({
       projectID: input.id,

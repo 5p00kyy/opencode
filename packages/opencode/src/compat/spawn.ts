@@ -7,9 +7,16 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "child_
 import { isBun } from "./runtime"
 import { readableStreamToText } from "./stream"
 
+export interface SpawnStdin {
+  write(data: string | Uint8Array): void
+  end(): void
+  // Web WritableStream method for compatibility
+  getWriter(): WritableStreamDefaultWriter<any>
+}
+
 export interface SpawnResult {
   pid: number
-  stdin: WritableStream | null
+  stdin: SpawnStdin | null
   stdout: ReadableStream<Uint8Array> | null
   stderr: ReadableStream<Uint8Array> | null
   exitCode: number | null
@@ -25,23 +32,33 @@ export interface SpawnOptionsType {
   stderr?: "pipe" | "inherit" | "ignore" | null
 }
 
+export interface SpawnObjectOptions extends SpawnOptionsType {
+  cmd: string[]
+}
+
 /**
  * Spawn a process - works like Bun.spawn()
+ * Supports two calling styles:
+ *   spawn(['cmd', 'arg1'], { cwd: '...' })
+ *   spawn({ cmd: ['cmd', 'arg1'], cwd: '...' })
  */
-export function spawn(cmd: string[], options: SpawnOptionsType = {}): SpawnResult {
+export function spawn(cmdOrOptions: string[] | SpawnObjectOptions, options?: SpawnOptionsType): SpawnResult {
+  // Normalize arguments - support both (cmd[], options) and ({cmd, ...options}) styles
+  const cmd = Array.isArray(cmdOrOptions) ? cmdOrOptions : cmdOrOptions.cmd
+  const opts: SpawnOptionsType = Array.isArray(cmdOrOptions) ? (options ?? {}) : cmdOrOptions
   if (isBun) {
-    return Bun.spawn(cmd, options as any) as unknown as SpawnResult
+    return Bun.spawn(cmd, opts as any) as unknown as SpawnResult
   }
 
   // Node.js implementation
   const [command, ...args] = cmd
   const proc = nodeSpawn(command, args, {
-    cwd: options.cwd,
-    env: { ...process.env, ...options.env } as NodeJS.ProcessEnv,
+    cwd: opts.cwd,
+    env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
     stdio: [
-      options.stdin === "pipe" ? "pipe" : options.stdin === "inherit" ? "inherit" : "ignore",
-      options.stdout === "pipe" ? "pipe" : options.stdout === "inherit" ? "inherit" : "ignore",
-      options.stderr === "pipe" ? "pipe" : options.stderr === "inherit" ? "inherit" : "ignore",
+      opts.stdin === "pipe" ? "pipe" : opts.stdin === "inherit" ? "inherit" : "ignore",
+      opts.stdout === "pipe" ? "pipe" : opts.stdout === "inherit" ? "inherit" : "ignore",
+      opts.stderr === "pipe" ? "pipe" : opts.stderr === "inherit" ? "inherit" : "ignore",
     ],
   })
 
@@ -55,7 +72,7 @@ export function spawn(cmd: string[], options: SpawnOptionsType = {}): SpawnResul
 
   return {
     pid: proc.pid ?? 0,
-    stdin: proc.stdin ? nodeStreamToWebStream(proc.stdin, "writable") : null,
+    stdin: proc.stdin ? createSpawnStdin(proc.stdin) : null,
     stdout: proc.stdout ? nodeStreamToWebStream(proc.stdout, "readable") : null,
     stderr: proc.stderr ? nodeStreamToWebStream(proc.stderr, "readable") : null,
     get exitCode() {
@@ -64,6 +81,37 @@ export function spawn(cmd: string[], options: SpawnOptionsType = {}): SpawnResul
     exited: exitPromise,
     kill(signal?: number) {
       proc.kill(signal)
+    },
+  }
+}
+
+// Create a Bun-compatible stdin wrapper for Node.js streams
+function createSpawnStdin(stream: NodeJS.WritableStream): SpawnStdin {
+  const webStream = new WritableStream({
+    write(chunk) {
+      return new Promise((resolve, reject) => {
+        stream.write(chunk, (err: Error | null | undefined) => {
+          if (err) reject(err)
+          else resolve()
+        })
+      })
+    },
+    close() {
+      return new Promise((resolve) => {
+        stream.end(resolve)
+      })
+    },
+  })
+
+  return {
+    write(data: string | Uint8Array) {
+      stream.write(data)
+    },
+    end() {
+      stream.end()
+    },
+    getWriter() {
+      return webStream.getWriter()
     },
   }
 }

@@ -20,7 +20,7 @@ export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, whi
 export { file, write, type FileHandle } from "./file"
 
 // Shell operations (replaces Bun.$)
-export { $, exec, type ShellResult } from "./shell"
+export { $, exec, ShellError, type ShellResult, type ShellPromise } from "./shell"
 
 // Process spawning (replaces Bun.spawn)
 export { spawn, spawnSync, type SpawnResult, type SpawnOptionsType } from "./spawn"
@@ -32,4 +32,4 @@ export { Glob, createGlob, type GlobScanOptions } from "./glob"
 export { readableStreamToText, readableStreamToArrayBuffer, readableStreamToBlob } from "./stream"
 
 // HTTP Server (replaces Bun.serve)
-export { serve, serveSimple, type ServeOptions, type ServerInstance } from "./serve"
+export { serve, serveSimple, type ServeOptions, type ServerInstance, type ServerHandle } from "./serve"

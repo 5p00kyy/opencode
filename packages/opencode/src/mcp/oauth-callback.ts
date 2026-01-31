@@ -1,5 +1,7 @@
 import { Log } from "../util/log"
 import { OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_PATH } from "./oauth-provider"
+import { serve, type ServerHandle } from "../compat"
+import net from "net"
 
 const log = Log.create({ service: "mcp.oauth-callback" })
 
@@ -51,7 +53,7 @@ interface PendingAuth {
 }
 
 export namespace McpOAuthCallback {
-  let server: ReturnType<typeof Bun.serve> | undefined
+  let server: ServerHandle | undefined
   const pendingAuths = new Map<string, PendingAuth>()
 
   const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -65,7 +67,7 @@ export namespace McpOAuthCallback {
       return
     }
 
-    server = Bun.serve({
+    server = await serve({
       port: OAUTH_CALLBACK_PORT,
       fetch(req) {
         const url = new URL(req.url)
@@ -160,23 +162,21 @@ export namespace McpOAuthCallback {
 
   export async function isPortInUse(): Promise<boolean> {
     return new Promise((resolve) => {
-      Bun.connect({
-        hostname: "127.0.0.1",
-        port: OAUTH_CALLBACK_PORT,
-        socket: {
-          open(socket) {
-            socket.end()
-            resolve(true)
-          },
-          error() {
-            resolve(false)
-          },
-          data() {},
-          close() {},
-        },
-      }).catch(() => {
+      const socket = new net.Socket()
+      socket.setTimeout(1000)
+      socket.once("connect", () => {
+        socket.destroy()
+        resolve(true)
+      })
+      socket.once("timeout", () => {
+        socket.destroy()
         resolve(false)
       })
+      socket.once("error", () => {
+        socket.destroy()
+        resolve(false)
+      })
+      socket.connect(OAUTH_CALLBACK_PORT, "127.0.0.1")
     })
   }
 

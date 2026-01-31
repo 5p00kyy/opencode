@@ -25,6 +25,9 @@ export interface ServerInstance {
   stop(closeActiveConnections?: boolean): Promise<void>
 }
 
+// Type alias for backward compatibility with Bun.serve return type
+export type ServerHandle = ServerInstance
+
 /**
  * Start an HTTP server - works like Bun.serve()
  * For Node.js, uses @hono/node-server for Hono apps

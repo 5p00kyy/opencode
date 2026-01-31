@@ -210,12 +210,14 @@ export namespace Worktree {
       .catch(() => false)
   }
 
-  function outputText(input: Uint8Array | undefined) {
-    if (!input?.length) return ""
+  function outputText(input: string | Uint8Array | undefined) {
+    if (!input) return ""
+    if (typeof input === "string") return input.trim()
+    if (!input.length) return ""
     return new TextDecoder().decode(input).trim()
   }
 
-  function errorText(result: { stdout?: Uint8Array; stderr?: Uint8Array }) {
+  function errorText(result: { stdout?: string | Uint8Array; stderr?: string | Uint8Array }) {
     return [outputText(result.stderr), outputText(result.stdout)].filter(Boolean).join("\n")
   }
 

@@ -26,7 +26,7 @@ import { Provider } from "../../provider/provider"
 import { Bus } from "../../bus"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
-import { $, write, sleep } from "@/compat"
+import { $, write, sleep, ShellError } from "@/compat"
 
 type GitHubAuthor = {
   login: string
@@ -628,7 +628,7 @@ export const GithubRunCommand = cmd({
         exitCode = 1
         console.error(e instanceof Error ? e.message : String(e))
         let msg = e
-        if (e instanceof $.ShellError) {
+        if (e instanceof ShellError) {
           msg = e.stderr.toString()
         } else if (e instanceof Error) {
           msg = e.message

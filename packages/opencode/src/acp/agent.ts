@@ -40,6 +40,7 @@ import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
 import type { Event, OpencodeClient, SessionMessageResponse } from "@opencode-ai/sdk/v2"
 import { applyPatch } from "diff"
+import { file } from "@/compat"
 
 type ModeOption = { id: string; name: string; description?: string }
 type ModelOption = { modelId: string; name: string }
@@ -159,7 +160,7 @@ export namespace ACP {
                 const filepath = typeof metadata["filepath"] === "string" ? metadata["filepath"] : ""
                 const diff = typeof metadata["diff"] === "string" ? metadata["diff"] : ""
 
-                const content = await Bun.file(filepath).text()
+                const content = await file(filepath).text()
                 const newContent = getNewContent(content, diff)
 
                 if (newContent) {
