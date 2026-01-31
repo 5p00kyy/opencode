@@ -26,7 +26,7 @@ import { Provider } from "../../provider/provider"
 import { Bus } from "../../bus"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
-import { $ } from "bun"
+import { $, write, sleep } from "@/compat"
 
 type GitHubAuthor = {
   login: string
@@ -348,7 +348,7 @@ export const GithubInstallCommand = cmd({
               }
 
               retries++
-              await Bun.sleep(1000)
+              await sleep(1000)
             } while (true)
 
             s.stop("Installed GitHub app")
@@ -368,7 +368,7 @@ export const GithubInstallCommand = cmd({
                 ? ""
                 : `\n        env:${providers[provider].env.map((e) => `\n          ${e}: \${{ secrets.${e} }}`).join("")}`
 
-            await Bun.write(
+            await write(
               path.join(app.root, WORKFLOW_FILE),
               `name: opencode
 
@@ -1289,7 +1289,7 @@ Co-authored-by: ${actor} <${actor}@users.noreply.github.com>"`
         } catch (e) {
           if (retries > 0) {
             console.log(`Retrying after ${delayMs}ms...`)
-            await Bun.sleep(delayMs)
+            await sleep(delayMs)
             return withRetry(fn, retries - 1, delayMs)
           }
           throw e

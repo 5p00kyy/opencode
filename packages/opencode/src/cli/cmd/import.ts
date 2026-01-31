@@ -5,6 +5,7 @@ import { bootstrap } from "../bootstrap"
 import { Storage } from "../../storage/storage"
 import { Instance } from "../../project/instance"
 import { EOL } from "os"
+import { file } from "@/compat"
 
 export const ImportCommand = cmd({
   command: "import <file>",
@@ -66,8 +67,8 @@ export const ImportCommand = cmd({
           }),
         }
       } else {
-        const file = Bun.file(args.file)
-        exportData = await file.json().catch(() => {})
+        const fileHandle = file(args.file)
+        exportData = await fileHandle.json().catch(() => {})
         if (!exportData) {
           process.stdout.write(`File not found: ${args.file}`)
           process.stdout.write(EOL)

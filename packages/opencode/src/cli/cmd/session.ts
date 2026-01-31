@@ -7,28 +7,41 @@ import { Locale } from "../../util/locale"
 import { Flag } from "../../flag/flag"
 import { EOL } from "os"
 import path from "path"
+import { file, which, spawn } from "@/compat"
 
-function pagerCmd(): string[] {
+async function pagerCmd(): Promise<string[]> {
   const lessOptions = ["-R", "-S"]
   if (process.platform !== "win32") {
     return ["less", ...lessOptions]
   }
 
   // user could have less installed via other options
-  const lessOnPath = Bun.which("less")
+  const lessOnPath = which("less")
   if (lessOnPath) {
-    if (Bun.file(lessOnPath).size) return [lessOnPath, ...lessOptions]
+    const lessFile = file(lessOnPath)
+    if (await lessFile.exists()) {
+      const stats = await lessFile.stat()
+      if (stats.size) return [lessOnPath, ...lessOptions]
+    }
   }
 
   if (Flag.OPENCODE_GIT_BASH_PATH) {
     const less = path.join(Flag.OPENCODE_GIT_BASH_PATH, "..", "..", "usr", "bin", "less.exe")
-    if (Bun.file(less).size) return [less, ...lessOptions]
+    const lessFile = file(less)
+    if (await lessFile.exists()) {
+      const stats = await lessFile.stat()
+      if (stats.size) return [less, ...lessOptions]
+    }
   }
 
-  const git = Bun.which("git")
+  const git = which("git")
   if (git) {
     const less = path.join(git, "..", "..", "usr", "bin", "less.exe")
-    if (Bun.file(less).size) return [less, ...lessOptions]
+    const lessFile = file(less)
+    if (await lessFile.exists()) {
+      const stats = await lessFile.stat()
+      if (stats.size) return [less, ...lessOptions]
+    }
   }
 
   // Fall back to Windows built-in more (via cmd.exe)
@@ -86,15 +99,18 @@ export const SessionListCommand = cmd({
       const shouldPaginate = process.stdout.isTTY && !args.maxCount && args.format === "table"
 
       if (shouldPaginate) {
-        const proc = Bun.spawn({
-          cmd: pagerCmd(),
+        const pager = await pagerCmd()
+        const proc = spawn(pager, {
           stdin: "pipe",
           stdout: "inherit",
           stderr: "inherit",
         })
 
-        proc.stdin.write(output)
-        proc.stdin.end()
+        if (proc.stdin) {
+          const writer = proc.stdin.getWriter()
+          await writer.write(new TextEncoder().encode(output))
+          await writer.close()
+        }
         await proc.exited
       } else {
         console.log(output)

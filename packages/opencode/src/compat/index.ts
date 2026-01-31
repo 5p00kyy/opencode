@@ -14,7 +14,7 @@
  */
 
 // Runtime detection and utilities
-export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep } from "./runtime"
+export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep, hash, stdin, stderr, stdout, color } from "./runtime"
 
 // File operations (replaces Bun.file, Bun.write)
 export { file, write, type FileHandle } from "./file"
@@ -30,3 +30,6 @@ export { Glob, createGlob, type GlobScanOptions } from "./glob"
 
 // Stream utilities (replaces readableStreamToText from "bun")
 export { readableStreamToText, readableStreamToArrayBuffer, readableStreamToBlob } from "./stream"
+
+// HTTP Server (replaces Bun.serve)
+export { serve, serveSimple, type ServeOptions, type ServerInstance } from "./serve"

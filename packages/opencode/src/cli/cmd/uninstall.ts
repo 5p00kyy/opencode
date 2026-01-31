@@ -3,7 +3,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { Global } from "../../global"
-import { $ } from "bun"
+import { $, file as compatFile, write } from "@/compat"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
@@ -260,26 +260,26 @@ async function getShellConfigFile(): Promise<string | null> {
 
   const candidates = configFiles[shell] || configFiles.bash
 
-  for (const file of candidates) {
+  for (const candidate of candidates) {
     const exists = await fs
-      .access(file)
+      .access(candidate)
       .then(() => true)
       .catch(() => false)
     if (!exists) continue
 
-    const content = await Bun.file(file)
+    const content = await compatFile(candidate)
       .text()
       .catch(() => "")
     if (content.includes("# opencode") || content.includes(".opencode/bin")) {
-      return file
+      return candidate
     }
   }
 
   return null
 }
 
-async function cleanShellConfig(file: string) {
-  const content = await Bun.file(file).text()
+async function cleanShellConfig(configPath: string) {
+  const content = await compatFile(configPath).text()
   const lines = content.split("\n")
 
   const filtered: string[] = []
@@ -315,7 +315,7 @@ async function cleanShellConfig(file: string) {
   }
 
   const output = filtered.join("\n") + "\n"
-  await Bun.write(file, output)
+  await write(configPath, output)
 }
 
 async function getDirectorySize(dir: string): Promise<number> {

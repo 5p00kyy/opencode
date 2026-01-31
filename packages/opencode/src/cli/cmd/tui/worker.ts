@@ -8,8 +8,8 @@ import { upgrade } from "@/cli/upgrade"
 import { Config } from "@/config/config"
 import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
-import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
+import { sleep, type ServerInstance } from "@/compat"
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -37,7 +37,7 @@ GlobalBus.on("event", (event) => {
   Rpc.emit("global.event", event)
 })
 
-let server: Bun.Server<BunWebSocketData> | undefined
+let server: ServerInstance | undefined
 
 const eventStream = {
   abort: undefined as AbortController | undefined,
@@ -75,7 +75,7 @@ const startEventStream = (directory: string) => {
       ).catch(() => undefined)
 
       if (!events) {
-        await Bun.sleep(250)
+        await sleep(250)
         continue
       }
 
@@ -84,7 +84,7 @@ const startEventStream = (directory: string) => {
       }
 
       if (!signal.aborted) {
-        await Bun.sleep(250)
+        await sleep(250)
       }
     }
   })().catch((error) => {

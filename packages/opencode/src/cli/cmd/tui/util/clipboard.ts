@@ -1,9 +1,9 @@
-import { $ } from "bun"
 import { platform, release } from "os"
 import clipboardy from "clipboardy"
 import { lazy } from "../../../../util/lazy.js"
 import { tmpdir } from "os"
 import path from "path"
+import { $, file, spawn, which } from "@/compat"
 
 /**
  * Writes text to clipboard via OSC 52 escape sequence.
@@ -35,8 +35,8 @@ export namespace Clipboard {
         await $`osascript -e 'set imageData to the clipboard as "PNGf"' -e 'set fileRef to open for access POSIX file "${tmpfile}" with write permission' -e 'set eof fileRef to 0' -e 'write imageData to fileRef' -e 'close access fileRef'`
           .nothrow()
           .quiet()
-        const file = Bun.file(tmpfile)
-        const buffer = await file.arrayBuffer()
+        const tmpFile = file(tmpfile)
+        const buffer = await tmpFile.arrayBuffer()
         return { data: Buffer.from(buffer).toString("base64"), mime: "image/png" }
       } catch {
       } finally {
@@ -76,7 +76,7 @@ export namespace Clipboard {
   const getCopyMethod = lazy(() => {
     const os = platform()
 
-    if (os === "darwin" && Bun.which("osascript")) {
+    if (os === "darwin" && which("osascript")) {
       console.log("clipboard: using osascript")
       return async (text: string) => {
         const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
@@ -85,19 +85,19 @@ export namespace Clipboard {
     }
 
     if (os === "linux") {
-      if (process.env["WAYLAND_DISPLAY"] && Bun.which("wl-copy")) {
+      if (process.env["WAYLAND_DISPLAY"] && which("wl-copy")) {
         console.log("clipboard: using wl-copy")
         return async (text: string) => {
-          const proc = Bun.spawn(["wl-copy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
+          const proc = spawn(["wl-copy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
           proc.stdin.write(text)
           proc.stdin.end()
           await proc.exited.catch(() => {})
         }
       }
-      if (Bun.which("xclip")) {
+      if (which("xclip")) {
         console.log("clipboard: using xclip")
         return async (text: string) => {
-          const proc = Bun.spawn(["xclip", "-selection", "clipboard"], {
+          const proc = spawn(["xclip", "-selection", "clipboard"], {
             stdin: "pipe",
             stdout: "ignore",
             stderr: "ignore",
@@ -107,10 +107,10 @@ export namespace Clipboard {
           await proc.exited.catch(() => {})
         }
       }
-      if (Bun.which("xsel")) {
+      if (which("xsel")) {
         console.log("clipboard: using xsel")
         return async (text: string) => {
-          const proc = Bun.spawn(["xsel", "--clipboard", "--input"], {
+          const proc = spawn(["xsel", "--clipboard", "--input"], {
             stdin: "pipe",
             stdout: "ignore",
             stderr: "ignore",
@@ -126,7 +126,7 @@ export namespace Clipboard {
       console.log("clipboard: using powershell")
       return async (text: string) => {
         // Pipe via stdin to avoid PowerShell string interpolation ($env:FOO, $(), etc.)
-        const proc = Bun.spawn(
+        const proc = spawn(
           [
             "powershell.exe",
             "-NonInteractive",

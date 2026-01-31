@@ -13,6 +13,7 @@ import { Env } from "../env"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { iife } from "@/util/iife"
+import { hash } from "../compat"
 
 // Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
@@ -977,7 +978,7 @@ export namespace Provider {
           ...model.headers,
         }
 
-      const key = Bun.hash.xxHash32(JSON.stringify({ providerID: model.providerID, npm: model.api.npm, options }))
+      const key = hash(JSON.stringify({ providerID: model.providerID, npm: model.api.npm, options }))
       const existing = s.sdk.get(key)
       if (existing) return existing
 
