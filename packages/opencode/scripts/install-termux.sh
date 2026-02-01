@@ -80,30 +80,63 @@ fi
 
 cd "$INSTALL_DIR/packages/opencode"
 
-# Step 6: Use Termux-compatible package.json (pre-resolved catalog: references)
-info "Setting up Termux-compatible package.json..."
+# Step 6: Use Termux-compatible package.json files (pre-resolved catalog: and workspace: references)
+info "Setting up Termux-compatible package.json files..."
+
+# Main opencode package
 if [ -f "package.termux.json" ]; then
     cp package.json package.json.bak
     cp package.termux.json package.json
-    success "Using Termux-compatible package.json"
+    success "Using Termux-compatible package.json for opencode"
 else
     warn "package.termux.json not found, using original (may have issues)"
 fi
 
-# Step 7: Install npm dependencies
+# Workspace packages (util, plugin, sdk)
+WORKSPACE_PACKAGES="util plugin sdk/js"
+for pkg in $WORKSPACE_PACKAGES; do
+    PKG_DIR="$INSTALL_DIR/packages/$pkg"
+    if [ -f "$PKG_DIR/package.termux.json" ]; then
+        cp "$PKG_DIR/package.json" "$PKG_DIR/package.json.bak"
+        cp "$PKG_DIR/package.termux.json" "$PKG_DIR/package.json"
+        success "Using Termux-compatible package.json for $pkg"
+    fi
+done
+
+# Step 7: Disable workspace detection (prevent npm from reading root package.json catalog: refs)
+info "Configuring npm to ignore workspace..."
+# Remove the root package.json temporarily to prevent workspace detection
+if [ -f "$INSTALL_DIR/package.json" ]; then
+    mv "$INSTALL_DIR/package.json" "$INSTALL_DIR/package.json.workspace-bak"
+fi
+
+# Step 8: Install npm dependencies
 info "Installing npm dependencies..."
-npm install --legacy-peer-deps 2>&1 | tail -10 || {
+npm install --legacy-peer-deps 2>&1 | tail -20 || {
     warn "Standard install failed, trying with --force..."
-    npm install --force 2>&1 | tail -10 || error "Failed to install dependencies"
+    npm install --force 2>&1 | tail -20 || error "Failed to install dependencies"
 }
 success "Dependencies installed"
 
-# Step 8: Restore original package.json (for git consistency)
+# Restore root package.json
+if [ -f "$INSTALL_DIR/package.json.workspace-bak" ]; then
+    mv "$INSTALL_DIR/package.json.workspace-bak" "$INSTALL_DIR/package.json"
+fi
+
+# Step 9: Restore original package.json files (for git consistency)
 if [ -f "package.json.bak" ]; then
     mv package.json.bak package.json
 fi
 
-# Step 9: Try to install node-pty for terminal features (optional)
+# Restore workspace packages
+for pkg in $WORKSPACE_PACKAGES; do
+    PKG_DIR="$INSTALL_DIR/packages/$pkg"
+    if [ -f "$PKG_DIR/package.json.bak" ]; then
+        mv "$PKG_DIR/package.json.bak" "$PKG_DIR/package.json"
+    fi
+done
+
+# Step 10: Try to install node-pty for terminal features (optional)
 info "Attempting to install node-pty for terminal features..."
 if npm install node-pty --build-from-source 2>&1; then
     success "node-pty installed - terminal features enabled"
@@ -112,16 +145,19 @@ else
     warn "This is normal on some Termux setups. Core functionality will still work."
 fi
 
-# Step 10: Run compat layer tests
+# Step 11: Run compat layer tests
 info "Running compatibility tests..."
-if npx tsx test-compat-node.ts 2>&1 | tee /tmp/opencode-test.log | grep -q "0 failed"; then
+TEST_LOG="${TMPDIR:-$PREFIX/tmp}/opencode-test.log"
+mkdir -p "$(dirname "$TEST_LOG")" 2>/dev/null || true
+if npx tsx test-compat-node.ts 2>&1 | tee "$TEST_LOG" | grep -q "0 failed"; then
     success "All compatibility tests passed!"
 else
-    cat /tmp/opencode-test.log
+    cat "$TEST_LOG" 2>/dev/null || true
     warn "Some tests may have failed. Check output above for details."
 fi
+rm -f "$TEST_LOG" 2>/dev/null || true
 
-# Step 11: Create launcher script
+# Step 12: Create launcher script
 info "Creating launcher script..."
 LAUNCHER="$PREFIX/bin/opencode"
 mkdir -p "$PREFIX/bin"
@@ -135,7 +171,7 @@ LAUNCHER_EOF
 chmod +x "$LAUNCHER"
 success "Launcher created at $LAUNCHER"
 
-# Step 12: Create alias in shell config
+# Step 13: Create alias in shell config
 info "Adding shell alias..."
 SHELL_RC="$HOME/.bashrc"
 if [ -f "$HOME/.zshrc" ]; then
