@@ -568,20 +568,11 @@ export namespace Server {
 
     const tryServe = async (port: number) => {
       try {
-        if (isBun) {
-          const args = {
-            hostname: opts.hostname,
-            idleTimeout: 0,
-            fetch: App().fetch,
-            ...(websocket && { websocket }),
-            port,
-          }
-          return (globalThis as any).Bun.serve(args)
-        }
-        // Node.js fallback using our compat serve (no websocket support)
         return await serve({
           hostname: opts.hostname,
+          idleTimeout: 0,
           fetch: App().fetch,
+          ...(isBun && websocket && { websocket }),
           port,
         })
       } catch {

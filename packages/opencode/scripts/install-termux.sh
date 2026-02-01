@@ -341,9 +341,16 @@ echo ""
 echo -e "To reinstall: ${BLUE}curl -fsSL <url> | bash -s -- --reinstall${NC}"
 echo ""
 
-# Offer to restart shell
-read -p "Restart shell to apply changes? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    exec $SHELL -l
+# Offer to restart shell (handle both interactive and piped execution)
+if [ -t 0 ]; then
+    # Interactive terminal available - prompt user
+    read -p "Restart shell to apply changes? [y/N] " -n 1 -r </dev/tty
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        exec $SHELL -l
+    fi
+else
+    # Running via curl | bash - no interactive prompt possible
+    echo ""
+    info "Run 'source ~/.bashrc' or restart your terminal to apply PATH changes."
 fi
