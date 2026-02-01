@@ -124,11 +124,15 @@ interface ShellOptions {
 /**
  * Execute a shell command - works like Bun.$
  * Usage: await $`git status`
+ * 
+ * The command is NOT executed until the promise is awaited.
+ * This allows chaining methods like .quiet() and .nothrow() before execution.
  */
 export function $(strings: TemplateStringsArray, ...values: unknown[]): ShellPromise {
   const command = strings.reduce((acc, str, i) => acc + str + (values[i] ?? ""), "")
 
-  const createPromise = (opts: ShellOptions = {}): ShellPromise => {
+  // Create a lazy shell promise that only executes when awaited
+  const createLazyPromise = (opts: ShellOptions = {}): ShellPromise => {
     if (isBun) {
       // Use Bun's native shell
       const bunShell = (globalThis as any).Bun.$
@@ -140,68 +144,96 @@ export function $(strings: TemplateStringsArray, ...values: unknown[]): ShellPro
       return result
     }
 
-    // Node.js implementation
-    const executePromise = new Promise<ShellResult>((resolve, reject) => {
-      const proc = spawn(command, {
-        shell: true,
-        cwd: opts.cwd,
-        stdio: ["inherit", "pipe", "pipe"],
-        env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
+    // Node.js implementation with lazy execution
+    let cachedPromise: Promise<ShellResult> | null = null
+    
+    const execute = (): Promise<ShellResult> => {
+      if (cachedPromise) return cachedPromise
+      
+      cachedPromise = new Promise<ShellResult>((resolve, reject) => {
+        const proc = spawn(command, {
+          shell: true,
+          cwd: opts.cwd,
+          stdio: ["inherit", "pipe", "pipe"],
+          env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
+        })
+
+        let stdout = ""
+        let stderr = ""
+
+        proc.stdout?.on("data", (data) => {
+          stdout += data.toString()
+          if (!opts.quiet) process.stdout.write(data)
+        })
+
+        proc.stderr?.on("data", (data) => {
+          stderr += data.toString()
+          if (!opts.quiet) process.stderr.write(data)
+        })
+
+        proc.on("close", (code) => {
+          const result = new NodeShellResult(stdout, stderr, code ?? 0)
+          if (code !== 0 && code !== null && !opts.nothrow) {
+            const error = new ShellError(`Command failed: ${command}`, stdout, stderr, code ?? 1)
+            reject(error)
+          } else {
+            resolve(result)
+          }
+        })
+
+        proc.on("error", (err) => {
+          if (opts.nothrow) {
+            resolve(new NodeShellResult("", err.message, 1))
+          } else {
+            reject(err)
+          }
+        })
       })
-
-      let stdout = ""
-      let stderr = ""
-
-      proc.stdout?.on("data", (data) => {
-        stdout += data.toString()
-        if (!opts.quiet) process.stdout.write(data)
-      })
-
-      proc.stderr?.on("data", (data) => {
-        stderr += data.toString()
-        if (!opts.quiet) process.stderr.write(data)
-      })
-
-      proc.on("close", (code) => {
-        const result = new NodeShellResult(stdout, stderr, code ?? 0)
-        if (code !== 0 && code !== null && !opts.nothrow) {
-          const error = new ShellError(`Command failed: ${command}`, stdout, stderr, code ?? 1)
-          reject(error)
-        } else {
-          resolve(result)
-        }
-      })
-
-      proc.on("error", (err) => {
-        if (opts.nothrow) {
-          resolve(new NodeShellResult("", err.message, 1))
-        } else {
-          reject(err)
-        }
-      })
-    }) as ShellPromise
-
-    // Add chainable methods
-    executePromise.quiet = () => createPromise({ ...opts, quiet: true })
-    executePromise.nothrow = () => createPromise({ ...opts, nothrow: true })
-    executePromise.throws = (shouldThrow: boolean) => createPromise({ ...opts, nothrow: !shouldThrow })
-    executePromise.cwd = (dir: string) => createPromise({ ...opts, cwd: dir })
-    executePromise.env = (vars: Record<string, string | undefined>) => createPromise({ ...opts, env: { ...opts.env, ...vars } })
-    executePromise.text = async () => (await executePromise).text()
-    executePromise.json = async <T>() => (await executePromise).json<T>()
-    executePromise.arrayBuffer = async () => (await executePromise).arrayBuffer()
-    executePromise.lines = async function* () {
-      const result = await executePromise
-      const lines = result.stdout.split("\n")
-      for (const line of lines) {
-        yield line
-      }
+      
+      return cachedPromise
     }
 
-    return executePromise
+    // Create a thenable object that executes on await
+    const lazyPromise = {
+      then<TResult1 = ShellResult, TResult2 = never>(
+        onfulfilled?: ((value: ShellResult) => TResult1 | PromiseLike<TResult1>) | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+      ): Promise<TResult1 | TResult2> {
+        return execute().then(onfulfilled, onrejected)
+      },
+      catch<TResult = never>(
+        onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
+      ): Promise<ShellResult | TResult> {
+        return execute().catch(onrejected)
+      },
+      finally(onfinally?: (() => void) | null): Promise<ShellResult> {
+        return execute().finally(onfinally)
+      },
+      // Chainable methods - return NEW lazy promise with updated options
+      quiet: () => createLazyPromise({ ...opts, quiet: true }),
+      nothrow: () => createLazyPromise({ ...opts, nothrow: true }),
+      throws: (shouldThrow: boolean) => createLazyPromise({ ...opts, nothrow: !shouldThrow }),
+      cwd: (dir: string) => createLazyPromise({ ...opts, cwd: dir }),
+      env: (vars: Record<string, string | undefined>) => createLazyPromise({ ...opts, env: { ...opts.env, ...vars } }),
+      // Convenience methods
+      text: async () => (await execute()).text(),
+      json: async <T>() => (await execute()).json<T>(),
+      arrayBuffer: async () => (await execute()).arrayBuffer(),
+      lines: async function* () {
+        const result = await execute()
+        const lines = result.stdout.split("\n")
+        for (const line of lines) {
+          yield line
+        }
+      },
+      // Make it look like a promise
+      [Symbol.toStringTag]: "Promise",
+    } as ShellPromise
+
+    return lazyPromise
   }
 
-  return createPromise()
+  return createLazyPromise()
 }
 
 // Attach ShellError to $ function for compatibility with Bun.$.ShellError

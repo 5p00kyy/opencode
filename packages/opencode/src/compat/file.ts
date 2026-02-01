@@ -15,6 +15,7 @@ export interface FileHandle {
   arrayBuffer(): Promise<ArrayBuffer>
   bytes(): Promise<Uint8Array>
   exists(): Promise<boolean>
+  size(): Promise<number>
   stat(): Promise<{ size: number; mtime: Date; isDirectory(): boolean; isFile(): boolean }>
   write(data: string | Uint8Array | ArrayBuffer | Blob | Response): Promise<number>
 }
@@ -74,6 +75,11 @@ class NodeFileHandle implements FileHandle {
     } catch {
       return false
     }
+  }
+
+  async size(): Promise<number> {
+    const s = await stat(this.name)
+    return s.size
   }
 
   async stat() {
