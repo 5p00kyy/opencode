@@ -118,12 +118,22 @@ npm install --legacy-peer-deps 2>&1 | tail -20 || {
 }
 success "Dependencies installed"
 
-# Restore root package.json
+# Step 9: Try to install node-pty for terminal features (optional)
+# Note: This must run BEFORE restoring original package.json to avoid catalog: errors
+info "Attempting to install node-pty for terminal features..."
+if npm install node-pty 2>&1 | tail -5; then
+    success "node-pty installed - terminal features enabled"
+else
+    warn "node-pty installation failed - terminal features will be disabled"
+    warn "This is normal on some Termux setups. Core functionality will still work."
+fi
+
+# Step 10: Restore root package.json
 if [ -f "$INSTALL_DIR/package.json.workspace-bak" ]; then
     mv "$INSTALL_DIR/package.json.workspace-bak" "$INSTALL_DIR/package.json"
 fi
 
-# Step 9: Restore original package.json files (for git consistency)
+# Step 11: Restore original package.json files (for git consistency)
 if [ -f "package.json.bak" ]; then
     mv package.json.bak package.json
 fi
@@ -136,16 +146,7 @@ for pkg in $WORKSPACE_PACKAGES; do
     fi
 done
 
-# Step 10: Try to install node-pty for terminal features (optional)
-info "Attempting to install node-pty for terminal features..."
-if npm install node-pty --build-from-source 2>&1; then
-    success "node-pty installed - terminal features enabled"
-else
-    warn "node-pty installation failed - terminal features will be disabled"
-    warn "This is normal on some Termux setups. Core functionality will still work."
-fi
-
-# Step 11: Run compat layer tests
+# Step 12: Run compat layer tests
 info "Running compatibility tests..."
 TEST_LOG="${TMPDIR:-$PREFIX/tmp}/opencode-test.log"
 mkdir -p "$(dirname "$TEST_LOG")" 2>/dev/null || true
@@ -157,21 +158,32 @@ else
 fi
 rm -f "$TEST_LOG" 2>/dev/null || true
 
-# Step 12: Create launcher script
+# Step 13: Create launcher script
 info "Creating launcher script..."
+# Ensure PREFIX is set (should be /data/data/com.termux/files/usr on Termux)
+if [ -z "$PREFIX" ]; then
+    PREFIX="/data/data/com.termux/files/usr"
+fi
 LAUNCHER="$PREFIX/bin/opencode"
-mkdir -p "$PREFIX/bin"
-cat > "$LAUNCHER" << 'LAUNCHER_EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+mkdir -p "$PREFIX/bin" 2>/dev/null || true
+
+# Create launcher using printf to avoid heredoc parsing issues
+printf '#!/data/data/com.termux/files/usr/bin/bash
 # OpenCode Launcher for Termux
 OPENCODE_DIR="$HOME/opencode/packages/opencode"
 cd "$OPENCODE_DIR"
 exec npx tsx ./src/index.ts "$@"
-LAUNCHER_EOF
-chmod +x "$LAUNCHER"
-success "Launcher created at $LAUNCHER"
+' > "$LAUNCHER"
 
-# Step 13: Create alias in shell config
+if [ -f "$LAUNCHER" ]; then
+    chmod +x "$LAUNCHER"
+    success "Launcher created at $LAUNCHER"
+else
+    warn "Could not create launcher at $LAUNCHER"
+    warn "You can still run OpenCode manually from $INSTALL_DIR/packages/opencode"
+fi
+
+# Step 14: Create alias in shell config
 info "Adding shell alias..."
 SHELL_RC="$HOME/.bashrc"
 if [ -f "$HOME/.zshrc" ]; then
