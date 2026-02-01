@@ -5,7 +5,7 @@ import z from "zod"
 import { Identifier } from "../id/id"
 import { Log } from "../util/log"
 import type { WSContext } from "hono/ws"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { lazy } from "@opencode-ai/util/lazy"
 import { Shell } from "@/shell/shell"
 
@@ -73,7 +73,7 @@ export namespace Pty {
     subscribers: Set<WSContext>
   }
 
-  const state = Instance.state(
+  const state = createInstanceState(
     () => new Map<string, ActiveSession>(),
     async (sessions) => {
       for (const session of sessions.values()) {

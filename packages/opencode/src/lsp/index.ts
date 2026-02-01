@@ -8,7 +8,7 @@ import { LSPServer } from "./server"
 import z from "zod"
 import { Config } from "../config/config"
 import { spawn } from "child_process"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { Flag } from "@/flag/flag"
 
 export namespace LSP {
@@ -76,7 +76,7 @@ export namespace LSP {
     }
   }
 
-  const state = Instance.state(
+  const state = createInstanceState(
     async () => {
       const clients: LSPClient.Info[] = []
       const servers: Record<string, LSPServer.Info> = {}

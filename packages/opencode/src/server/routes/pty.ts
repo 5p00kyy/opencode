@@ -1,11 +1,21 @@
 import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
-import { upgradeWebSocket } from "hono/bun"
 import z from "zod"
 import { Pty } from "@/pty"
 import { Storage } from "../../storage/storage"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { isBun } from "@/compat"
+
+// Dynamic import for Bun-specific WebSocket upgrade
+const upgradeWebSocket = isBun
+  ? (await import("hono/bun")).upgradeWebSocket
+  : () => {
+      // Return a middleware that returns a 501 on Node.js
+      return () => {
+        throw new Error("PTY WebSocket connections are not supported on Node.js runtime")
+      }
+    }
 
 export const PtyRoutes = lazy(() =>
   new Hono()

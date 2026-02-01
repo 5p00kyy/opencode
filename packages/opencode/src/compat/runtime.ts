@@ -218,3 +218,20 @@ export function stringWidth(str: string): number {
   }
   return stringWidthFn(str)
 }
+
+/**
+ * Polyfill for Array.fromAsync (not available in Node.js < 22)
+ * Collects items from an async iterable into an array
+ */
+export async function arrayFromAsync<T>(asyncIterable: AsyncIterable<T>): Promise<T[]> {
+  const result: T[] = []
+  for await (const item of asyncIterable) {
+    result.push(item)
+  }
+  return result
+}
+
+// Install polyfill globally if Array.fromAsync doesn't exist
+if (typeof (Array as any).fromAsync !== "function") {
+  ;(Array as any).fromAsync = arrayFromAsync
+}

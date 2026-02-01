@@ -1,3 +1,7 @@
+// Import compat layer first to install polyfills (Array.fromAsync, etc.)
+import "./compat/runtime"
+import { isBun } from "./compat/runtime"
+
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
@@ -19,13 +23,36 @@ import { McpCommand } from "./cli/cmd/mcp"
 import { GithubCommand } from "./cli/cmd/github"
 import { ExportCommand } from "./cli/cmd/export"
 import { ImportCommand } from "./cli/cmd/import"
-import { AttachCommand } from "./cli/cmd/tui/attach"
-import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+
+// TUI commands require @opentui which only works on Bun
+// On Node.js, we provide stub commands that show an error
+const TuiThreadCommand = isBun
+  ? (await import("./cli/cmd/tui/thread")).TuiThreadCommand
+  : {
+      command: "$0 [project]",
+      describe: "start opencode tui (requires Bun runtime)",
+      handler: () => {
+        console.error("Error: The TUI interface requires Bun runtime.")
+        console.error("On Node.js/Termux, use 'opencode serve' for headless mode.")
+        process.exit(1)
+      },
+    }
+
+const AttachCommand = isBun
+  ? (await import("./cli/cmd/tui/attach")).AttachCommand
+  : {
+      command: "attach",
+      describe: "attach to running opencode server (requires Bun runtime)",
+      handler: () => {
+        console.error("Error: The attach command requires Bun runtime.")
+        process.exit(1)
+      },
+    }
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {

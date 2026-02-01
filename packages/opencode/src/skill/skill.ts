@@ -2,7 +2,7 @@ import z from "zod"
 import path from "path"
 import os from "os"
 import { Config } from "../config/config"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { NamedError } from "@opencode-ai/util/error"
 import { ConfigMarkdown } from "../config/markdown"
 import { Log } from "../util/log"
@@ -45,7 +45,7 @@ export namespace Skill {
   const CLAUDE_SKILL_GLOB = new Glob("skills/**/SKILL.md")
   const SKILL_GLOB = new Glob("**/SKILL.md")
 
-  export const state = Instance.state(async () => {
+  export const state = createInstanceState(async () => {
     const skills: Record<string, Info> = {}
 
     const addSkill = async (match: string) => {

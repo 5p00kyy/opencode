@@ -5,6 +5,7 @@ import path from "path"
 import z from "zod"
 import { Log } from "@/util/log"
 import { Instance } from "./instance"
+import { createInstanceState } from "./instance-state"
 import { FileWatcher } from "@/file/watcher"
 
 const log = Log.create({ service: "vcs" })
@@ -38,7 +39,7 @@ export namespace Vcs {
       .catch(() => undefined)
   }
 
-  const state = Instance.state(
+  const state = createInstanceState(
     async () => {
       if (Instance.project.vcs !== "git") {
         return { branch: async () => undefined, unsubscribe: undefined }

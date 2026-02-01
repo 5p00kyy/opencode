@@ -4,7 +4,7 @@ import z from "zod"
 import { Log } from "../util/log"
 import { Identifier } from "../id/id"
 import { Plugin } from "../plugin"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { Wildcard } from "../util/wildcard"
 
 export namespace Permission {
@@ -50,7 +50,7 @@ export namespace Permission {
     ),
   }
 
-  const state = Instance.state(
+  const state = createInstanceState(
     () => {
       const pending: {
         [sessionID: string]: {

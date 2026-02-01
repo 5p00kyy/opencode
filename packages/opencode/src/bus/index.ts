@@ -1,5 +1,6 @@
 import z from "zod"
 import { Log } from "../util/log"
+import { createInstanceState } from "@/project/instance-state"
 import { Instance } from "../project/instance"
 import { BusEvent } from "./bus-event"
 import { GlobalBus } from "./global"
@@ -15,28 +16,36 @@ export namespace Bus {
     }),
   )
 
-  const state = Instance.state(
-    () => {
-      const subscriptions = new Map<any, Subscription[]>()
+  // Lazy initialization to avoid circular dependency issues
+  let _state: ReturnType<typeof Instance.state<{ subscriptions: Map<any, Subscription[]> }>> | undefined
 
-      return {
-        subscriptions,
-      }
-    },
-    async (entry) => {
-      const wildcard = entry.subscriptions.get("*")
-      if (!wildcard) return
-      const event = {
-        type: InstanceDisposed.type,
-        properties: {
-          directory: Instance.directory,
+  function state() {
+    if (!_state) {
+      _state = createInstanceState(
+        () => {
+          const subscriptions = new Map<any, Subscription[]>()
+
+          return {
+            subscriptions,
+          }
         },
-      }
-      for (const sub of [...wildcard]) {
-        sub(event)
-      }
-    },
-  )
+        async (entry) => {
+          const wildcard = entry.subscriptions.get("*")
+          if (!wildcard) return
+          const event = {
+            type: InstanceDisposed.type,
+            properties: {
+              directory: Instance.directory,
+            },
+          }
+          for (const sub of [...wildcard]) {
+            sub(event)
+          }
+        },
+      )
+    }
+    return _state()
+  }
 
   export async function publish<Definition extends BusEvent.Definition>(
     def: Definition,

@@ -7,7 +7,7 @@ import z from "zod"
 import * as Formatter from "./formatter"
 import { Config } from "../config/config"
 import { mergeDeep } from "remeda"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { spawn } from "@/compat"
 
 export namespace Format {
@@ -24,7 +24,7 @@ export namespace Format {
     })
   export type Status = z.infer<typeof Status>
 
-  const state = Instance.state(async () => {
+  const state = createInstanceState(async () => {
     const enabled: Record<string, boolean> = {}
     const cfg = await Config.get()
 

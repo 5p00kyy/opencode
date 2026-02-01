@@ -1,20 +1,52 @@
+import { isBun } from "@/compat/runtime"
+
+// Node.js worker_threads support
+let parentPort: any = null
+if (!isBun) {
+  try {
+    const wt = await import("worker_threads")
+    parentPort = wt.parentPort
+  } catch {}
+}
+
 export namespace Rpc {
   type Definition = {
     [method: string]: (input: any) => any
   }
 
   export function listen(rpc: Definition) {
-    onmessage = async (evt) => {
-      const parsed = JSON.parse(evt.data)
+    const handler = async (data: string) => {
+      const parsed = JSON.parse(data)
       if (parsed.type === "rpc.request") {
         const result = await rpc[parsed.method](parsed.input)
-        postMessage(JSON.stringify({ type: "rpc.result", result, id: parsed.id }))
+        const response = JSON.stringify({ type: "rpc.result", result, id: parsed.id })
+        if (isBun) {
+          postMessage(response)
+        } else if (parentPort) {
+          parentPort.postMessage(response)
+        }
       }
+    }
+
+    if (isBun) {
+      // Bun uses Web Worker API
+      ;(globalThis as any).onmessage = (evt: MessageEvent) => handler(evt.data)
+    } else if (parentPort) {
+      // Node.js uses worker_threads
+      parentPort.on("message", handler)
+    } else {
+      // Not in a worker context - skip
+      console.warn("Rpc.listen called outside of worker context")
     }
   }
 
   export function emit(event: string, data: unknown) {
-    postMessage(JSON.stringify({ type: "rpc.event", event, data }))
+    const msg = JSON.stringify({ type: "rpc.event", event, data })
+    if (isBun) {
+      postMessage(msg)
+    } else if (parentPort) {
+      parentPort.postMessage(msg)
+    }
   }
 
   export function client<T extends Definition>(target: {

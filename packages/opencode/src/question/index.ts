@@ -1,7 +1,7 @@
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { Identifier } from "@/id/id"
-import { Instance } from "@/project/instance"
+import { Instance, createInstanceState } from "@/project/instance"
 import { Log } from "@/util/log"
 import z from "zod"
 
@@ -79,7 +79,7 @@ export namespace Question {
     ),
   }
 
-  const state = Instance.state(async () => {
+  const state = createInstanceState(async () => {
     const pending: Record<
       string,
       {

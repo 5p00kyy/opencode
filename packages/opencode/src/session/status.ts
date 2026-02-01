@@ -1,6 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
-import { Instance } from "@/project/instance"
+import { Instance, createInstanceState } from "@/project/instance"
 import z from "zod"
 
 export namespace SessionStatus {
@@ -41,7 +41,7 @@ export namespace SessionStatus {
     ),
   }
 
-  const state = Instance.state(() => {
+  const state = createInstanceState(() => {
     const data: Record<string, Info> = {}
     return data
   })

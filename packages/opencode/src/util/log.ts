@@ -75,12 +75,11 @@ export namespace Log {
 
   async function cleanup(dir: string) {
     const glob = new Glob("????-??-??T??????.log")
-    const files = await Array.fromAsync(
-      glob.scan({
-        cwd: dir,
-        absolute: true,
-      }),
-    )
+    // Collect async iterable into array (Array.fromAsync not available in Node.js < 22)
+    const files: string[] = []
+    for await (const file of glob.scan({ cwd: dir, absolute: true })) {
+      files.push(file)
+    }
     if (files.length <= 5) return
 
     const filesToDelete = files.slice(0, -10)

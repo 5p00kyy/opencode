@@ -5,7 +5,7 @@ import { Log } from "../util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { Server } from "../server/server"
 import { BunProc } from "../bun"
-import { Instance } from "../project/instance"
+import { Instance, createInstanceState } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
@@ -21,7 +21,7 @@ export namespace Plugin {
   // Built-in plugins that are directly imported (not installed from npm)
   const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin]
 
-  const state = Instance.state(async () => {
+  const state = createInstanceState(async () => {
     const client = createOpencodeClient({
       baseUrl: "http://localhost:4096",
       // @ts-ignore - fetch type incompatibility

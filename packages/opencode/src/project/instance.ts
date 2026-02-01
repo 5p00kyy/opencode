@@ -1,18 +1,15 @@
 import { Log } from "@/util/log"
-import { Context } from "../util/context"
 import { Project } from "./project"
 import { State } from "./state"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { Filesystem } from "@/util/filesystem"
+import { instanceContext, createInstanceState } from "./instance-state"
 
-interface Context {
-  directory: string
-  worktree: string
-  project: Project.Info
-}
-const context = Context.create<Context>("instance")
-const cache = new Map<string, Promise<Context>>()
+// Re-export for convenience
+export { createInstanceState }
+
+const cache = new Map<string, Promise<{ directory: string; worktree: string; project: Project.Info }>>()
 
 const disposal = {
   all: undefined as Promise<void> | undefined,
@@ -30,7 +27,7 @@ export const Instance = {
           worktree: sandbox,
           project,
         }
-        await context.provide(ctx, async () => {
+        await instanceContext.provide(ctx, async () => {
           await input.init?.()
         })
         return ctx
@@ -38,18 +35,18 @@ export const Instance = {
       cache.set(input.directory, existing)
     }
     const ctx = await existing
-    return context.provide(ctx, async () => {
+    return instanceContext.provide(ctx, async () => {
       return input.fn()
     })
   },
   get directory() {
-    return context.use().directory
+    return instanceContext.use().directory
   },
   get worktree() {
-    return context.use().worktree
+    return instanceContext.use().worktree
   },
   get project() {
-    return context.use().project
+    return instanceContext.use().project
   },
   /**
    * Check if a path is within the project boundary.
@@ -64,7 +61,7 @@ export const Instance = {
     return Filesystem.contains(Instance.worktree, filepath)
   },
   state<S>(init: () => S, dispose?: (state: Awaited<S>) => Promise<void>): () => S {
-    return State.create(() => Instance.directory, init, dispose)
+    return createInstanceState(init, dispose)
   },
   async dispose() {
     Log.Default.info("disposing instance", { directory: Instance.directory })
@@ -101,7 +98,7 @@ export const Instance = {
 
         if (cache.get(key) !== value) continue
 
-        await context.provide(ctx, async () => {
+        await instanceContext.provide(ctx, async () => {
           await Instance.dispose()
         })
       }
