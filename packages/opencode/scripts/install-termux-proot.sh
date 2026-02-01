@@ -504,16 +504,25 @@ export TERM="${TERM:-xterm-256color}"
 export COLORTERM="${COLORTERM:-truecolor}"
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+# OpenTUI compatibility flags
 export OPENTUI_FORCE_EXPLICIT_WIDTH=false
 export OPENTUI_FORCE_WCWIDTH=true
+export OPENTUI_NO_GRAPHICS=true
+# Bun paths
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 '
 
-# Debug environment additions
+# Debug environment additions (verbose output)
 DEBUG_ENV='
 export OTUI_DEBUG=true
 export OTUI_SHOW_STATS=true
+export OTUI_DEBUG_FFI=true
+'
+
+# Safe mode - disable alternate screen which can cause issues in proot
+SAFE_MODE_ENV='
+export OTUI_USE_ALTERNATE_SCREEN=false
 '
 
 # Minimal TUI test script
@@ -563,6 +572,13 @@ case "$1" in
         shift
         ARGS=$(printf '%q ' "$@")
         exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
+        ;;
+    safe)
+        # Run with safe mode (no alternate screen, reduced features)
+        shift
+        ARGS=$(printf '%q ' "$@")
+        echo "Running OpenCode in safe mode (no alternate screen)..."
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $SAFE_MODE_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
         ;;
     serve)
         # Run headless server

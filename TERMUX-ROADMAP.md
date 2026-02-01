@@ -341,6 +341,13 @@ opencode-proot serve        # Start headless API server
 opencode-proot shell        # Enter proot shell for manual commands
 opencode-proot update       # Update OpenCode
 
+# Diagnostic & troubleshooting commands:
+opencode-proot test-tui     # Run comprehensive TUI diagnostic
+opencode-proot tui-minimal  # Test bare TUI renderer creation
+opencode-proot debug        # Run with debug flags (OTUI_DEBUG=true)
+opencode-proot safe         # Run with safe mode (no alternate screen)
+opencode-proot reinstall    # Clean reinstall dependencies
+
 # Aliases (after shell restart):
 ocp                         # Short for opencode-proot
 ocp-serve                   # Short for opencode-proot serve
@@ -388,6 +395,100 @@ opencode serve --port 4096
 | Node.js (Headless)   | ❌ No  | ⚠️ Limited | ~90%        | ~300MB     |
 
 **Note:** Arch Linux is the default distro, optimized for 64-bit only devices (Pixel 6+). Use `--distro=ubuntu` if you prefer Ubuntu.
+
+---
+
+## Troubleshooting
+
+### Black Screen When Starting TUI
+
+If `opencode-proot` shows a black screen:
+
+1. **Run diagnostics first:**
+
+   ```bash
+   opencode-proot test-tui
+   ```
+
+   This will show:
+   - System architecture info
+   - Whether `@opentui/core-linux-arm64` is installed
+   - Whether `libopentui.so` exists and is valid
+   - FFI import test results
+
+2. **Try safe mode:**
+
+   ```bash
+   opencode-proot safe
+   ```
+
+   This disables alternate screen mode which can cause issues in proot.
+
+3. **Try minimal TUI test:**
+
+   ```bash
+   opencode-proot tui-minimal
+   ```
+
+   This tests just the TUI renderer creation in isolation.
+
+4. **Check native library:**
+
+   ```bash
+   opencode-proot shell
+   cd ~/opencode
+   find node_modules -name "libopentui.so" -exec file {} \;
+   ```
+
+   Should show: `ELF 64-bit LSB shared object, ARM aarch64`
+
+5. **Reinstall dependencies:**
+   ```bash
+   opencode-proot reinstall
+   ```
+
+### OpenTUI Environment Variables
+
+These can be set to troubleshoot TUI issues:
+
+```bash
+# Inside proot shell:
+export OTUI_DEBUG=true              # Enable debug mode
+export OTUI_SHOW_STATS=true         # Show stats overlay
+export OTUI_DEBUG_FFI=true          # Debug FFI calls
+export OTUI_USE_ALTERNATE_SCREEN=false  # Disable alternate screen
+export OPENTUI_NO_GRAPHICS=true     # Disable Kitty graphics
+export OPENTUI_FORCE_WCWIDTH=true   # Use simpler width calculation
+```
+
+### PRoot PTY Issues
+
+If TUI apps work (htop, vim) but OpenCode doesn't:
+
+1. **Try with `script` wrapper:**
+
+   ```bash
+   opencode-proot shell
+   cd ~/opencode/packages/opencode
+   script -q -c "~/.bun/bin/bun run --conditions=browser ./src/index.ts" /dev/null
+   ```
+
+2. **Check terminal emulator settings:**
+   - Use Termux's default terminal or a well-supported one
+   - Ensure UTF-8 is enabled
+   - Try setting `TERM=xterm-256color`
+
+### "32-bit instructions not supported" Warning
+
+This warning on Pixel 8 and other 64-bit only devices is expected and can be ignored. Use Arch Linux (default) which is pure 64-bit.
+
+### Bun Install Fails with PermissionDenied
+
+This is caused by Android SELinux blocking hardlinks. The install script handles this automatically with `--backend=copyfile`, but if manually installing:
+
+```bash
+bun install --backend=copyfile
+```
 
 ---
 
