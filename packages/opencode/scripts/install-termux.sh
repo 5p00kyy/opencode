@@ -160,15 +160,39 @@ if [ -f "$INSTALL_DIR/package.json" ]; then
     mv "$INSTALL_DIR/package.json" "$INSTALL_DIR/package.json.workspace-bak"
 fi
 
-# Step 8: Install npm dependencies
-info "Installing npm dependencies (this may take a few minutes)..."
+# Step 8: Install dependencies in workspace packages (in dependency order)
+# This is required because npm doesn't auto-install deps inside file: referenced packages
+info "Installing dependencies in workspace packages..."
+
+# SDK first (no runtime deps, but install for completeness)
+info "  Installing sdk/js dependencies..."
+cd "$INSTALL_DIR/packages/sdk/js" || error "Failed to enter sdk/js directory"
+npm install --legacy-peer-deps 2>&1 | tail -3 || warn "sdk/js install had issues"
+
+# Util needs zod
+info "  Installing util dependencies..."
+cd "$INSTALL_DIR/packages/util" || error "Failed to enter util directory"
+npm install --legacy-peer-deps 2>&1 | tail -3 || warn "util install had issues"
+
+# Plugin needs zod and sdk
+info "  Installing plugin dependencies..."
+cd "$INSTALL_DIR/packages/plugin" || error "Failed to enter plugin directory"
+npm install --legacy-peer-deps 2>&1 | tail -3 || warn "plugin install had issues"
+
+success "Workspace package dependencies installed"
+
+# Return to opencode directory
+cd "$INSTALL_DIR/packages/opencode" || error "Failed to return to opencode directory"
+
+# Step 9: Install main package npm dependencies
+info "Installing main package dependencies (this may take a few minutes)..."
 npm install --legacy-peer-deps 2>&1 | tail -20 || {
     warn "Standard install failed, trying with --force..."
     npm install --force 2>&1 | tail -20 || error "Failed to install dependencies"
 }
-success "Dependencies installed"
+success "Main package dependencies installed"
 
-# Step 9: Try to install node-pty for terminal features (optional)
+# Step 10: Try to install node-pty for terminal features (optional)
 # Note: This must run BEFORE restoring original package.json to avoid catalog: errors
 info "Attempting to install node-pty for terminal features..."
 # Use --legacy-peer-deps to avoid zod version conflicts
@@ -181,12 +205,12 @@ else
     warn "This is normal on Termux. Core functionality will still work."
 fi
 
-# Step 10: Restore root package.json
+# Step 11: Restore root package.json
 if [ -f "$INSTALL_DIR/package.json.workspace-bak" ]; then
     mv "$INSTALL_DIR/package.json.workspace-bak" "$INSTALL_DIR/package.json"
 fi
 
-# Step 11: Restore original package.json files (for git consistency)
+# Step 12: Restore original package.json files (for git consistency)
 if [ -f "package.json.bak" ]; then
     mv package.json.bak package.json
 fi
@@ -199,7 +223,7 @@ for pkg in $WORKSPACE_PACKAGES; do
     fi
 done
 
-# Step 12: Run compat layer tests
+# Step 13: Run compat layer tests
 info "Running compatibility tests..."
 TEST_LOG="${TMPDIR:-$PREFIX/tmp}/opencode-test.log"
 mkdir -p "$(dirname "$TEST_LOG")" 2>/dev/null || true
@@ -211,7 +235,7 @@ else
 fi
 rm -f "$TEST_LOG" 2>/dev/null || true
 
-# Step 13: Verify installation directory before creating launcher
+# Step 14: Verify installation directory before creating launcher
 if [ ! -d "$INSTALL_DIR/packages/opencode" ]; then
     error "Installation directory not found at $INSTALL_DIR/packages/opencode"
 fi
@@ -220,7 +244,7 @@ if [ ! -f "$INSTALL_DIR/packages/opencode/src/index.ts" ]; then
     error "Entry point not found at $INSTALL_DIR/packages/opencode/src/index.ts"
 fi
 
-# Step 14: Create launcher script
+# Step 15: Create launcher script
 info "Creating launcher script..."
 
 # Ensure PREFIX is set (should be /data/data/com.termux/files/usr on Termux)
@@ -280,7 +304,7 @@ if [ "$LAUNCHER_CREATED" = false ]; then
     warn "  cd $INSTALL_DIR/packages/opencode && npx tsx ./src/index.ts"
 fi
 
-# Step 15: Create alias in shell config
+# Step 16: Create alias in shell config
 if [ "$LAUNCHER_CREATED" = true ]; then
     info "Adding shell alias..."
     SHELL_RC="$HOME/.bashrc"
