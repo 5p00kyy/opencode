@@ -290,6 +290,12 @@ cd "$INSTALL_DIR"
 # ============================================================
 info "Installing npm dependencies (this may take several minutes)..."
 
+cd "$INSTALL_DIR"
+
+# Clear bun cache to avoid stale dependency issues
+info "Clearing bun cache..."
+rm -rf "$HOME/.bun/install/cache" 2>/dev/null || true
+
 # Run bun install from the repo root
 bun install 2>&1 | tail -10
 
@@ -298,10 +304,19 @@ if [ $? -ne 0 ]; then
     bun install 2>&1 | tail -10
 fi
 
-# Ensure critical dev dependencies are installed
-info "Installing additional dev dependencies..."
-cd "$INSTALL_DIR/packages/opencode"
-bun add @babel/core -d 2>&1 | tail -3
+# @babel/core is required by @opentui/solid but often not resolved in monorepos
+# Install it explicitly at the root level
+info "Installing @babel/core (required by @opentui/solid)..."
+bun add @babel/core@latest -d 2>&1 | tail -3
+
+# Verify it was installed
+if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
+    success "@babel/core installed at root"
+else
+    warn "@babel/core not at root, trying packages/opencode..."
+    cd "$INSTALL_DIR/packages/opencode"
+    bun add @babel/core@latest -d 2>&1 | tail -3
+fi
 
 success "Dependencies installed"
 
