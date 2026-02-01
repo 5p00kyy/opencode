@@ -7,12 +7,6 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux.sh | bash
 #
-# Or manually:
-#   pkg install curl
-#   curl -O https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux.sh
-#   chmod +x install-termux.sh
-#   ./install-termux.sh
-#
 
 set -e
 
@@ -67,7 +61,7 @@ success "Node.js $(node --version) is installed"
 
 # Step 4: Install optional packages for enhanced functionality
 info "Installing optional packages for enhanced functionality..."
-pkg install -y clang ripgrep fd || warn "Some optional packages failed to install"
+pkg install -y clang ripgrep fd 2>/dev/null || warn "Some optional packages failed to install"
 success "Optional packages installed"
 
 # Step 5: Clone or update the repository
@@ -84,47 +78,67 @@ else
     success "OpenCode cloned"
 fi
 
-cd "$INSTALL_DIR"
+cd "$INSTALL_DIR/packages/opencode"
 
-# Step 6: Install npm dependencies
+# Step 6: Use Termux-compatible package.json (pre-resolved catalog: references)
+info "Setting up Termux-compatible package.json..."
+if [ -f "package.termux.json" ]; then
+    cp package.json package.json.bak
+    cp package.termux.json package.json
+    success "Using Termux-compatible package.json"
+else
+    warn "package.termux.json not found, using original (may have issues)"
+fi
+
+# Step 7: Install npm dependencies
 info "Installing npm dependencies..."
-npm install --ignore-scripts 2>&1 | tail -5 || error "Failed to install dependencies"
+npm install --legacy-peer-deps 2>&1 | tail -10 || {
+    warn "Standard install failed, trying with --force..."
+    npm install --force 2>&1 | tail -10 || error "Failed to install dependencies"
+}
 success "Dependencies installed"
 
-# Step 7: Try to install node-pty for terminal features (optional)
+# Step 8: Restore original package.json (for git consistency)
+if [ -f "package.json.bak" ]; then
+    mv package.json.bak package.json
+fi
+
+# Step 9: Try to install node-pty for terminal features (optional)
 info "Attempting to install node-pty for terminal features..."
-cd "$INSTALL_DIR/packages/opencode"
-if npm install node-pty 2>&1; then
+if npm install node-pty --build-from-source 2>&1; then
     success "node-pty installed - terminal features enabled"
 else
     warn "node-pty installation failed - terminal features will be disabled"
     warn "This is normal on some Termux setups. Core functionality will still work."
 fi
 
-# Step 8: Run compat layer tests
+# Step 10: Run compat layer tests
 info "Running compatibility tests..."
-if npx tsx test-compat-node.ts 2>&1 | grep -q "0 failed"; then
+if npx tsx test-compat-node.ts 2>&1 | tee /tmp/opencode-test.log | grep -q "0 failed"; then
     success "All compatibility tests passed!"
 else
+    cat /tmp/opencode-test.log
     warn "Some tests may have failed. Check output above for details."
 fi
 
-# Step 9: Create launcher script
+# Step 11: Create launcher script
 info "Creating launcher script..."
 LAUNCHER="$PREFIX/bin/opencode"
-cat > "$LAUNCHER" << 'EOF'
+mkdir -p "$PREFIX/bin"
+cat > "$LAUNCHER" << 'LAUNCHER_EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 # OpenCode Launcher for Termux
-cd "$HOME/opencode/packages/opencode"
+OPENCODE_DIR="$HOME/opencode/packages/opencode"
+cd "$OPENCODE_DIR"
 exec npx tsx ./src/index.ts "$@"
-EOF
+LAUNCHER_EOF
 chmod +x "$LAUNCHER"
 success "Launcher created at $LAUNCHER"
 
-# Step 10: Create alias in shell config
+# Step 12: Create alias in shell config
 info "Adding shell alias..."
 SHELL_RC="$HOME/.bashrc"
-if [ -n "$ZSH_VERSION" ]; then
+if [ -f "$HOME/.zshrc" ]; then
     SHELL_RC="$HOME/.zshrc"
 fi
 
