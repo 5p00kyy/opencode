@@ -227,13 +227,16 @@ fi
 # ============================================================
 info "Installing Bun..."
 
-# Always set up Bun paths
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
+# Define paths - use absolute paths throughout
+BUN_INSTALL="$HOME/.bun"
+BUN_BIN="$BUN_INSTALL/bin/bun"
 
-# Check if Bun is already installed and working
-if command -v bun &> /dev/null && bun --version &> /dev/null; then
-    success "Bun already installed: $(bun --version)"
+# Export for the installer script
+export BUN_INSTALL
+
+# Check if Bun is already installed and working (use absolute path)
+if [ -x "$BUN_BIN" ] && "$BUN_BIN" --version &> /dev/null; then
+    success "Bun already installed: $($BUN_BIN --version)"
 else
     info "Downloading and installing Bun..."
     
@@ -243,21 +246,35 @@ else
     # Install Bun
     curl -fsSL https://bun.sh/install | bash
     
-    # Source the new paths
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
+    # The installer should have created the binary - verify it exists
+    info "Verifying Bun installation..."
     
-    # Verify installation
-    if command -v bun &> /dev/null && bun --version &> /dev/null; then
-        success "Bun installed: $(bun --version)"
+    if [ -f "$BUN_BIN" ]; then
+        info "Bun binary found at $BUN_BIN"
+        chmod +x "$BUN_BIN"
+        
+        # Test it works
+        if "$BUN_BIN" --version &> /dev/null; then
+            success "Bun installed: $($BUN_BIN --version)"
+        else
+            err "Bun binary exists but won't execute!"
+            file "$BUN_BIN" 2>/dev/null || true
+            exit 1
+        fi
     else
-        err "Bun installation failed!"
-        err "PATH=$PATH"
-        err "BUN_INSTALL=$BUN_INSTALL"
-        ls -la "$BUN_INSTALL/bin/" 2>/dev/null || err "Bun bin directory not found"
+        err "Bun binary not found at $BUN_BIN"
+        err "Listing $BUN_INSTALL directory:"
+        ls -la "$BUN_INSTALL" 2>/dev/null || err "$BUN_INSTALL doesn't exist"
+        ls -la "$BUN_INSTALL/bin" 2>/dev/null || err "$BUN_INSTALL/bin doesn't exist"
         exit 1
     fi
 fi
+
+# Add to PATH for this session
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+# Also source bashrc in case it has additional setup
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null || true
 
 # ============================================================
 # STEP C: Clone or update OpenCode
@@ -294,25 +311,25 @@ cd "$INSTALL_DIR"
 
 # IMPORTANT: Use --backend=copyfile on Android/proot
 # SELinux blocks hardlinks, causing PermissionDenied errors without this flag
-BUN_BACKEND="--backend=copyfile"
+BUN_FLAGS="--backend=copyfile"
 
 # Clear bun cache to avoid stale dependency issues
 info "Clearing bun cache..."
 rm -rf "$HOME/.bun/install/cache" 2>/dev/null || true
 
-# Run bun install with copyfile backend
+# Run bun install with copyfile backend (use absolute path)
 info "Running bun install (using copyfile backend for Android compatibility)..."
-bun install $BUN_BACKEND 2>&1 | tail -15
+"$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
 
 if [ $? -ne 0 ]; then
     warn "bun install had issues, trying again..."
-    bun install $BUN_BACKEND 2>&1 | tail -15
+    "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
 fi
 
 # @babel/core is required by @opentui/solid but often not resolved in monorepos
 # Install it explicitly at the root level
 info "Installing @babel/core (required by @opentui/solid)..."
-bun add @babel/core@latest -d $BUN_BACKEND 2>&1 | tail -3
+"$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
 
 # Verify it was installed
 if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
@@ -320,7 +337,7 @@ if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
 else
     warn "@babel/core not at root, trying packages/opencode..."
     cd "$INSTALL_DIR/packages/opencode"
-    bun add @babel/core@latest -d $BUN_BACKEND 2>&1 | tail -3
+    "$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
 fi
 
 success "Dependencies installed"
@@ -343,12 +360,12 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 BASHRC
 fi
 
-# Add OpenCode alias
+# Add OpenCode alias (use absolute path to bun)
 if ! grep -q "alias opencode=" "$HOME/.bashrc" 2>/dev/null; then
     cat >> "$HOME/.bashrc" << 'BASHRC'
 
 # OpenCode
-alias opencode="cd ~/opencode && bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
+alias opencode="cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
 alias oc="opencode"
 BASHRC
 fi
@@ -362,11 +379,13 @@ info "Verifying installation..."
 
 cd "$INSTALL_DIR/packages/opencode"
 
-# Quick smoke test
-if bun --version &> /dev/null; then
-    success "Bun is working"
+# Quick smoke test (use absolute path)
+if "$BUN_BIN" --version &> /dev/null; then
+    success "Bun is working: $($BUN_BIN --version)"
 else
     err "Bun is not working!"
+    err "BUN_BIN=$BUN_BIN"
+    ls -la "$BUN_BIN" 2>/dev/null || err "Binary not found"
     exit 1
 fi
 
