@@ -360,6 +360,22 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 BASHRC
 fi
 
+# Add OpenTUI/Terminal environment variables for Termux compatibility
+if ! grep -q "OPENTUI_FORCE" "$HOME/.bashrc" 2>/dev/null; then
+    cat >> "$HOME/.bashrc" << 'BASHRC'
+
+# OpenTUI/Terminal settings for Termux proot compatibility
+export TERM="${TERM:-xterm-256color}"
+export COLORTERM="${COLORTERM:-truecolor}"
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
+# OpenTUI compatibility flags
+export OPENTUI_FORCE_EXPLICIT_WIDTH=false
+export OPENTUI_FORCE_WCWIDTH=true
+BASHRC
+fi
+
 # Add OpenCode alias (use absolute path to bun)
 if ! grep -q "alias opencode=" "$HOME/.bashrc" 2>/dev/null; then
     cat >> "$HOME/.bashrc" << 'BASHRC'
@@ -367,6 +383,7 @@ if ! grep -q "alias opencode=" "$HOME/.bashrc" 2>/dev/null; then
 # OpenCode
 alias opencode="cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
 alias oc="opencode"
+alias opencode-debug="cd ~/opencode && OTUI_DEBUG=true OTUI_SHOW_STATS=true ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
 BASHRC
 fi
 
@@ -437,14 +454,32 @@ mkdir -p "$HOME/.local/bin"
 
 LAUNCHER="$HOME/.local/bin/opencode-proot"
 
-cat > "$LAUNCHER" << LAUNCHER_SCRIPT
+cat > "$LAUNCHER" << 'LAUNCHER_SCRIPT'
 #!/data/data/com.termux/files/usr/bin/bash
 #
 # OpenCode PRoot Launcher
 # Runs OpenCode inside proot-distro for full Bun support
 #
 
-DISTRO="$DISTRO"
+DISTRO="__DISTRO_PLACEHOLDER__"
+
+# OpenTUI environment variables for Termux compatibility
+OPENTUI_ENV='
+export TERM="${TERM:-xterm-256color}"
+export COLORTERM="${COLORTERM:-truecolor}"
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export OPENTUI_FORCE_EXPLICIT_WIDTH=false
+export OPENTUI_FORCE_WCWIDTH=true
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+'
+
+# Debug environment additions
+DEBUG_ENV='
+export OTUI_DEBUG=true
+export OTUI_SHOW_STATS=true
+'
 
 # Check if proot-distro is available
 if ! command -v proot-distro &> /dev/null; then
@@ -453,29 +488,49 @@ if ! command -v proot-distro &> /dev/null; then
 fi
 
 # Handle special commands
-case "\$1" in
+case "$1" in
     shell)
         # Enter interactive shell in proot
         shift
-        exec proot-distro login "\$DISTRO" "\$@"
+        exec proot-distro login "$DISTRO" "$@"
         ;;
     update)
         # Update OpenCode in proot
-        exec proot-distro login "\$DISTRO" -- bash -c "cd ~/opencode && git pull && bun install"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && git pull && ~/.bun/bin/bun install --backend=copyfile"
+        ;;
+    debug)
+        # Run with debug flags
+        shift
+        ARGS=$(printf '%q ' "$@")
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
+        ;;
+    serve)
+        # Run headless server
+        shift
+        ARGS=$(printf '%q ' "$@")
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts serve $ARGS"
+        ;;
+    test-tui)
+        # Test if TUI can initialize - useful for debugging
+        echo "Testing TUI initialization..."
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV cd ~/opencode/packages/opencode && echo 'Checking OpenTUI native module...' && ls -la node_modules/@opentui/core-linux-arm64/ 2>/dev/null || echo 'OpenTUI linux-arm64 not found' && echo 'Testing bun...' && ~/.bun/bin/bun --version && echo 'Starting OpenCode with debug...' && ~/.bun/bin/bun run --conditions=browser ./src/index.ts --help"
         ;;
     *)
         # Run OpenCode with arguments
-        if [ \$# -eq 0 ]; then
-            # No arguments - run TUI (or serve if TUI fails)
-            exec proot-distro login "\$DISTRO" -- bash -c 'export BUN_INSTALL="\$HOME/.bun" && export PATH="\$BUN_INSTALL/bin:\$PATH" && cd ~/opencode && bun run --cwd packages/opencode --conditions=browser ./src/index.ts'
+        if [ $# -eq 0 ]; then
+            # No arguments - run TUI
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
         else
             # Pass arguments to OpenCode
-            ARGS="\$(printf '%q ' "\$@")"
-            exec proot-distro login "\$DISTRO" -- bash -c "export BUN_INSTALL=\"\\\$HOME/.bun\" && export PATH=\"\\\$BUN_INSTALL/bin:\\\$PATH\" && cd ~/opencode && bun run --cwd packages/opencode --conditions=browser ./src/index.ts \$ARGS"
+            ARGS=$(printf '%q ' "$@")
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
         fi
         ;;
 esac
 LAUNCHER_SCRIPT
+
+# Replace the distro placeholder
+sed -i "s|__DISTRO_PLACEHOLDER__|$DISTRO|g" "$LAUNCHER"
 
 chmod +x "$LAUNCHER"
 success "Launcher created at $LAUNCHER"
