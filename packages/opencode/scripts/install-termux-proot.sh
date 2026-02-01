@@ -263,6 +263,13 @@ cd "$INSTALL_DIR"
 # Install dependencies
 info "Installing dependencies (this may take a few minutes)..."
 bun install 2>&1 | tail -5
+
+# Ensure critical dev dependencies are installed (sometimes missed in monorepo)
+info "Ensuring dev dependencies..."
+cd "$INSTALL_DIR/packages/opencode"
+bun add @babel/core -d 2>&1 | tail -2 || true
+cd "$INSTALL_DIR"
+
 success "Dependencies installed"
 
 # Add Bun to shell profile
