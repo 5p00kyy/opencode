@@ -169,35 +169,33 @@ if [ -z "$PREFIX" ]; then
     PREFIX="/data/data/com.termux/files/usr"
 fi
 
-# Try multiple bin directories in order of preference
+# Try user directories first (more likely to succeed), then system directories
 LAUNCHER_CREATED=false
-for BIN_DIR in "$PREFIX/bin" "$HOME/.local/bin" "$HOME/bin"; do
-    # Try to create the directory
-    if mkdir -p "$BIN_DIR" 2>/dev/null; then
-        # Check if we can write to it
-        if [ -w "$BIN_DIR" ]; then
-            LAUNCHER="$BIN_DIR/opencode"
-            # Create launcher script line by line to avoid parsing issues
-            echo '#!/data/data/com.termux/files/usr/bin/bash' > "$LAUNCHER" 2>/dev/null
-            if [ $? -eq 0 ]; then
-                echo '# OpenCode Launcher for Termux' >> "$LAUNCHER"
-                echo 'cd "$HOME/opencode/packages/opencode"' >> "$LAUNCHER"
-                echo 'exec npx tsx ./src/index.ts "$@"' >> "$LAUNCHER"
-                chmod +x "$LAUNCHER"
-                success "Launcher created at $LAUNCHER"
-                LAUNCHER_CREATED=true
-                # Add to PATH if using non-standard location
-                if [ "$BIN_DIR" != "$PREFIX/bin" ]; then
-                    if ! grep -q "$BIN_DIR" "$HOME/.bashrc" 2>/dev/null; then
-                        echo "" >> "$HOME/.bashrc"
-                        echo "# Added by OpenCode installer" >> "$HOME/.bashrc"
-                        echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
-                        info "Added $BIN_DIR to PATH in .bashrc"
-                    fi
-                fi
-                break
+for BIN_DIR in "$HOME/.local/bin" "$HOME/bin" "$PREFIX/bin"; do
+    # Try to create the directory (suppress all errors)
+    mkdir -p "$BIN_DIR" 2>/dev/null || continue
+    
+    LAUNCHER="$BIN_DIR/opencode"
+    
+    # Try to create the launcher file using a subshell to capture all errors
+    if ( echo '#!/data/data/com.termux/files/usr/bin/bash' > "$LAUNCHER" ) 2>/dev/null; then
+        echo '# OpenCode Launcher for Termux' >> "$LAUNCHER"
+        echo 'cd "$HOME/opencode/packages/opencode"' >> "$LAUNCHER"
+        echo 'exec npx tsx ./src/index.ts "$@"' >> "$LAUNCHER"
+        chmod +x "$LAUNCHER" 2>/dev/null
+        success "Launcher created at $LAUNCHER"
+        LAUNCHER_CREATED=true
+        
+        # Add to PATH if using non-standard location
+        if [ "$BIN_DIR" != "$PREFIX/bin" ]; then
+            if ! grep -q "PATH.*$BIN_DIR" "$HOME/.bashrc" 2>/dev/null; then
+                echo "" >> "$HOME/.bashrc"
+                echo "# Added by OpenCode installer" >> "$HOME/.bashrc"
+                echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
+                info "Added $BIN_DIR to PATH in .bashrc"
             fi
         fi
+        break
     fi
 done
 
