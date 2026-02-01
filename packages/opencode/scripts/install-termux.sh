@@ -121,11 +121,14 @@ success "Dependencies installed"
 # Step 9: Try to install node-pty for terminal features (optional)
 # Note: This must run BEFORE restoring original package.json to avoid catalog: errors
 info "Attempting to install node-pty for terminal features..."
-if npm install node-pty 2>&1 | tail -5; then
+# Use --legacy-peer-deps to avoid zod version conflicts
+# Capture exit status properly (don't pipe to tail which breaks exit code)
+NPT_OUTPUT=$(npm install node-pty --legacy-peer-deps 2>&1) && NPT_STATUS=$? || NPT_STATUS=$?
+if [ $NPT_STATUS -eq 0 ]; then
     success "node-pty installed - terminal features enabled"
 else
     warn "node-pty installation failed - terminal features will be disabled"
-    warn "This is normal on some Termux setups. Core functionality will still work."
+    warn "This is normal on Termux. Core functionality will still work."
 fi
 
 # Step 10: Restore root package.json
@@ -160,43 +163,66 @@ rm -f "$TEST_LOG" 2>/dev/null || true
 
 # Step 13: Create launcher script
 info "Creating launcher script..."
+
 # Ensure PREFIX is set (should be /data/data/com.termux/files/usr on Termux)
 if [ -z "$PREFIX" ]; then
     PREFIX="/data/data/com.termux/files/usr"
 fi
-LAUNCHER="$PREFIX/bin/opencode"
-mkdir -p "$PREFIX/bin" 2>/dev/null || true
 
-# Create launcher using printf to avoid heredoc parsing issues
-printf '#!/data/data/com.termux/files/usr/bin/bash
-# OpenCode Launcher for Termux
-OPENCODE_DIR="$HOME/opencode/packages/opencode"
-cd "$OPENCODE_DIR"
-exec npx tsx ./src/index.ts "$@"
-' > "$LAUNCHER"
+# Try multiple bin directories in order of preference
+LAUNCHER_CREATED=false
+for BIN_DIR in "$PREFIX/bin" "$HOME/.local/bin" "$HOME/bin"; do
+    # Try to create the directory
+    if mkdir -p "$BIN_DIR" 2>/dev/null; then
+        # Check if we can write to it
+        if [ -w "$BIN_DIR" ]; then
+            LAUNCHER="$BIN_DIR/opencode"
+            # Create launcher script line by line to avoid parsing issues
+            echo '#!/data/data/com.termux/files/usr/bin/bash' > "$LAUNCHER" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo '# OpenCode Launcher for Termux' >> "$LAUNCHER"
+                echo 'cd "$HOME/opencode/packages/opencode"' >> "$LAUNCHER"
+                echo 'exec npx tsx ./src/index.ts "$@"' >> "$LAUNCHER"
+                chmod +x "$LAUNCHER"
+                success "Launcher created at $LAUNCHER"
+                LAUNCHER_CREATED=true
+                # Add to PATH if using non-standard location
+                if [ "$BIN_DIR" != "$PREFIX/bin" ]; then
+                    if ! grep -q "$BIN_DIR" "$HOME/.bashrc" 2>/dev/null; then
+                        echo "" >> "$HOME/.bashrc"
+                        echo "# Added by OpenCode installer" >> "$HOME/.bashrc"
+                        echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
+                        info "Added $BIN_DIR to PATH in .bashrc"
+                    fi
+                fi
+                break
+            fi
+        fi
+    fi
+done
 
-if [ -f "$LAUNCHER" ]; then
-    chmod +x "$LAUNCHER"
-    success "Launcher created at $LAUNCHER"
-else
-    warn "Could not create launcher at $LAUNCHER"
-    warn "You can still run OpenCode manually from $INSTALL_DIR/packages/opencode"
+if [ "$LAUNCHER_CREATED" = false ]; then
+    warn "Could not create launcher in any standard location"
+    warn "You can run OpenCode manually with:"
+    warn "  cd $INSTALL_DIR/packages/opencode && npx tsx ./src/index.ts"
 fi
 
 # Step 14: Create alias in shell config
-info "Adding shell alias..."
-SHELL_RC="$HOME/.bashrc"
-if [ -f "$HOME/.zshrc" ]; then
-    SHELL_RC="$HOME/.zshrc"
-fi
+if [ "$LAUNCHER_CREATED" = true ]; then
+    info "Adding shell alias..."
+    SHELL_RC="$HOME/.bashrc"
+    if [ -f "$HOME/.zshrc" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    fi
 
-if ! grep -q "alias oc=" "$SHELL_RC" 2>/dev/null; then
-    echo "" >> "$SHELL_RC"
-    echo "# OpenCode alias" >> "$SHELL_RC"
-    echo "alias oc='opencode'" >> "$SHELL_RC"
-    success "Added 'oc' alias to $SHELL_RC"
-else
-    info "Alias already exists in $SHELL_RC"
+    if ! grep -q "alias oc=" "$SHELL_RC" 2>/dev/null; then
+        echo "" >> "$SHELL_RC"
+        echo "# OpenCode alias" >> "$SHELL_RC"
+        echo "alias oc='opencode'" >> "$SHELL_RC"
+        success "Added 'oc' alias to $SHELL_RC"
+    else
+        info "Alias already exists in $SHELL_RC"
+    fi
 fi
 
 # Done!
