@@ -186,10 +186,17 @@ cd "$INSTALL_DIR/packages/opencode" || error "Failed to return to opencode direc
 
 # Step 9: Install main package npm dependencies
 info "Installing main package dependencies (this may take a few minutes)..."
-npm install --legacy-peer-deps 2>&1 | tail -20 || {
-    warn "Standard install failed, trying with --force..."
-    npm install --force 2>&1 | tail -20 || error "Failed to install dependencies"
-}
+# Capture output and exit status separately (piping to tail loses exit status)
+NPM_OUTPUT=$(npm install --legacy-peer-deps 2>&1) && NPM_STATUS=$? || NPM_STATUS=$?
+echo "$NPM_OUTPUT" | tail -20
+if [ $NPM_STATUS -ne 0 ]; then
+    warn "Standard install failed (exit $NPM_STATUS), trying with --force..."
+    NPM_OUTPUT=$(npm install --force 2>&1) && NPM_STATUS=$? || NPM_STATUS=$?
+    echo "$NPM_OUTPUT" | tail -20
+    if [ $NPM_STATUS -ne 0 ]; then
+        error "Failed to install dependencies (exit $NPM_STATUS)"
+    fi
+fi
 success "Main package dependencies installed"
 
 # Step 10: Try to install node-pty for terminal features (optional)

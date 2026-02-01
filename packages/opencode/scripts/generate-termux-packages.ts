@@ -12,14 +12,23 @@ const PACKAGES = [
 ]
 
 const EXCLUDED_DEPS = new Set([
+  // Parcel watcher - all platform-specific binaries fail on Android/Termux
+  "@parcel/watcher",
   "@parcel/watcher-darwin-arm64",
   "@parcel/watcher-darwin-x64",
+  "@parcel/watcher-linux-arm64-glibc",
+  "@parcel/watcher-linux-arm64-musl",
   "@parcel/watcher-linux-x64-gnu",
   "@parcel/watcher-linux-x64-glibc",
+  "@parcel/watcher-linux-x64-musl",
+  "@parcel/watcher-win32-arm64",
+  "@parcel/watcher-win32-ia32",
   "@parcel/watcher-win32-x64",
+  // Bun-specific native modules
   "bun-pty",
   "tree-sitter-bash",
   "@types/bun",
+  // Build-time only tools
   "@typescript/native-preview",
   "@hey-api/openapi-ts",
 ])
