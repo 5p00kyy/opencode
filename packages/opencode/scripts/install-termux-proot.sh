@@ -144,169 +144,230 @@ cat > "$PROOT_SETUP_SCRIPT" << 'SETUP_SCRIPT'
 # This runs inside the proot environment
 #
 
-set -e
+# Don't exit on error - we want to handle errors gracefully
+set +e
 
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 REPO_URL="__REPO_URL__"
 BRANCH="__BRANCH__"
 DISTRO_TYPE="__DISTRO__"
 INSTALL_DIR="$HOME/opencode"
+BUN_INSTALL="$HOME/.bun"
 
 info "Running inside proot environment ($DISTRO_TYPE)..."
 
-# Detect package manager and install dependencies
-install_packages() {
-    if command -v pacman &> /dev/null; then
-        # Arch Linux
-        info "Detected Arch Linux, using pacman..."
-        
-        # Initialize pacman keyring (required in proot)
-        pacman-key --init 2>/dev/null || true
-        pacman-key --populate archlinux 2>/dev/null || true
-        
-        # Update and install essential packages
-        info "Updating system and installing packages..."
-        pacman -Syu --noconfirm 2>&1 | tail -5
-        pacman -S --noconfirm --needed \
-            base-devel \
-            git \
-            curl \
-            wget \
-            unzip \
-            openssh \
-            ripgrep \
-            fd \
-            jq \
-            which \
-            2>&1 | tail -5
+# ============================================================
+# STEP A: Install system packages
+# ============================================================
+info "Installing system packages..."
+
+if command -v pacman &> /dev/null; then
+    # Arch Linux
+    info "Detected Arch Linux, using pacman..."
+    
+    # Initialize pacman keyring (required in proot)
+    info "Initializing pacman keyring (this may take a moment)..."
+    pacman-key --init 2>&1 | tail -3
+    pacman-key --populate archlinux 2>&1 | tail -3
+    
+    # Update and install essential packages
+    info "Updating system..."
+    pacman -Sy --noconfirm 2>&1 | tail -5
+    
+    info "Installing packages..."
+    pacman -S --noconfirm --needed \
+        base-devel \
+        git \
+        curl \
+        wget \
+        unzip \
+        ripgrep \
+        fd \
+        jq \
+        which \
+        2>&1 | tail -10
+    
+    if [ $? -eq 0 ]; then
         success "System packages installed"
-        
-        # Install yay (AUR helper)
-        if ! command -v yay &> /dev/null; then
-            info "Installing yay (AUR helper)..."
-            cd /tmp
-            rm -rf yay-bin 2>/dev/null || true
-            git clone https://aur.archlinux.org/yay-bin.git
-            cd yay-bin
-            # Need to run makepkg as non-root, but in proot we're "root"
-            # Use --asroot workaround or create a build user
-            makepkg -si --noconfirm 2>&1 | tail -5 || warn "yay installation may have issues in proot"
-            cd /tmp && rm -rf yay-bin
-            success "yay installed"
-        else
-            success "yay already installed"
-        fi
-        
-    elif command -v apt-get &> /dev/null; then
-        # Debian/Ubuntu
-        info "Detected Debian/Ubuntu, using apt..."
-        apt-get update -qq
-        apt-get install -y -qq \
-            curl git unzip build-essential ca-certificates \
-            ripgrep fd-find jq \
-            > /dev/null 2>&1
-        success "System packages installed"
-        
-    elif command -v apk &> /dev/null; then
-        # Alpine
-        info "Detected Alpine, using apk..."
-        apk update
-        apk add --no-cache \
-            curl git unzip build-base ca-certificates \
-            ripgrep fd jq bash
-        success "System packages installed"
-        
     else
-        warn "Unknown package manager, skipping system packages"
+        warn "Some packages may have failed, continuing..."
     fi
-}
-
-install_packages
-
-# Install Bun
-if ! command -v bun &> /dev/null; then
-    info "Installing Bun..."
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-    success "Bun installed: $(bun --version)"
+    
+elif command -v apt-get &> /dev/null; then
+    # Debian/Ubuntu
+    info "Detected Debian/Ubuntu, using apt..."
+    apt-get update -qq
+    apt-get install -y curl git unzip build-essential ca-certificates ripgrep fd-find jq 2>&1 | tail -5
+    success "System packages installed"
+    
+elif command -v apk &> /dev/null; then
+    # Alpine
+    info "Detected Alpine, using apk..."
+    apk update
+    apk add --no-cache curl git unzip build-base ca-certificates ripgrep fd jq bash
+    success "System packages installed"
+    
 else
-    success "Bun already installed: $(bun --version)"
+    warn "Unknown package manager, skipping system packages"
 fi
 
-# Ensure Bun is in PATH for this session
+# ============================================================
+# STEP B: Install Bun
+# ============================================================
+info "Installing Bun..."
+
+# Always set up Bun paths
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
-# Clone or update OpenCode
-if [ -d "$INSTALL_DIR" ]; then
-    info "Updating OpenCode..."
+# Check if Bun is already installed and working
+if command -v bun &> /dev/null && bun --version &> /dev/null; then
+    success "Bun already installed: $(bun --version)"
+else
+    info "Downloading and installing Bun..."
+    
+    # Remove any broken installation
+    rm -rf "$BUN_INSTALL" 2>/dev/null || true
+    
+    # Install Bun
+    curl -fsSL https://bun.sh/install | bash
+    
+    # Source the new paths
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+    
+    # Verify installation
+    if command -v bun &> /dev/null && bun --version &> /dev/null; then
+        success "Bun installed: $(bun --version)"
+    else
+        err "Bun installation failed!"
+        err "PATH=$PATH"
+        err "BUN_INSTALL=$BUN_INSTALL"
+        ls -la "$BUN_INSTALL/bin/" 2>/dev/null || err "Bun bin directory not found"
+        exit 1
+    fi
+fi
+
+# ============================================================
+# STEP C: Clone or update OpenCode
+# ============================================================
+info "Setting up OpenCode repository..."
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+    info "Updating existing OpenCode installation..."
     cd "$INSTALL_DIR"
-    git fetch origin "$BRANCH" 2>/dev/null || true
-    git checkout "$BRANCH" 2>/dev/null || true
-    git pull origin "$BRANCH" 2>/dev/null || warn "Pull failed, using existing code"
+    git fetch origin "$BRANCH" 2>&1 | tail -3
+    git checkout "$BRANCH" 2>&1 | tail -3
+    git pull origin "$BRANCH" 2>&1 | tail -3 || warn "Pull failed, using existing code"
     success "OpenCode updated"
 else
-    info "Cloning OpenCode..."
+    info "Cloning OpenCode repository..."
+    rm -rf "$INSTALL_DIR" 2>/dev/null || true
     git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
-    success "OpenCode cloned"
+    if [ $? -eq 0 ]; then
+        success "OpenCode cloned"
+    else
+        err "Failed to clone OpenCode repository"
+        exit 1
+    fi
 fi
 
 cd "$INSTALL_DIR"
 
-# Install dependencies
-info "Installing dependencies (this may take a few minutes)..."
-bun install 2>&1 | tail -5
+# ============================================================
+# STEP D: Install dependencies
+# ============================================================
+info "Installing npm dependencies (this may take several minutes)..."
 
-# Ensure critical dev dependencies are installed (sometimes missed in monorepo)
-info "Ensuring dev dependencies..."
+# Run bun install from the repo root
+bun install 2>&1 | tail -10
+
+if [ $? -ne 0 ]; then
+    warn "bun install had issues, trying again..."
+    bun install 2>&1 | tail -10
+fi
+
+# Ensure critical dev dependencies are installed
+info "Installing additional dev dependencies..."
 cd "$INSTALL_DIR/packages/opencode"
-bun add @babel/core -d 2>&1 | tail -2 || true
-cd "$INSTALL_DIR"
+bun add @babel/core -d 2>&1 | tail -3
 
 success "Dependencies installed"
 
-# Add Bun to shell profile
+# ============================================================
+# STEP E: Configure shell
+# ============================================================
+info "Configuring shell profile..."
+
+# Ensure .bashrc exists
+touch "$HOME/.bashrc"
+
+# Add Bun to PATH
 if ! grep -q "BUN_INSTALL" "$HOME/.bashrc" 2>/dev/null; then
-    echo '' >> "$HOME/.bashrc"
-    echo '# Bun' >> "$HOME/.bashrc"
-    echo 'export BUN_INSTALL="$HOME/.bun"' >> "$HOME/.bashrc"
-    echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> "$HOME/.bashrc"
+    cat >> "$HOME/.bashrc" << 'BASHRC'
+
+# Bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+BASHRC
 fi
 
-# Create convenience alias
+# Add OpenCode alias
 if ! grep -q "alias opencode=" "$HOME/.bashrc" 2>/dev/null; then
-    echo '' >> "$HOME/.bashrc"
-    echo '# OpenCode' >> "$HOME/.bashrc"
-    echo 'alias opencode="cd ~/opencode && bun run --cwd packages/opencode --conditions=browser ./src/index.ts"' >> "$HOME/.bashrc"
-    echo 'alias oc="opencode"' >> "$HOME/.bashrc"
+    cat >> "$HOME/.bashrc" << 'BASHRC'
+
+# OpenCode
+alias opencode="cd ~/opencode && bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
+alias oc="opencode"
+BASHRC
 fi
 
-# Verify installation
+success "Shell configured"
+
+# ============================================================
+# STEP F: Verify installation
+# ============================================================
 info "Verifying installation..."
+
 cd "$INSTALL_DIR/packages/opencode"
-if bun run --conditions=browser ./src/index.ts --version 2>/dev/null; then
-    success "OpenCode installation verified!"
+
+# Quick smoke test
+if bun --version &> /dev/null; then
+    success "Bun is working"
 else
-    warn "Version check failed, but installation may still work"
+    err "Bun is not working!"
+    exit 1
 fi
 
-echo ""
-success "PRoot environment setup complete!"
-echo ""
-echo -e "Inside proot, run: ${BLUE}opencode${NC} or ${BLUE}oc${NC}"
-if command -v yay &> /dev/null; then
-    echo -e "Use ${BLUE}yay -S <package>${NC} to install AUR packages"
+if [ -f "./src/index.ts" ]; then
+    success "OpenCode source files present"
+else
+    err "OpenCode source files missing!"
+    exit 1
 fi
+
+# ============================================================
+# Done
+# ============================================================
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  PRoot Environment Setup Complete!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo -e "Run OpenCode with: ${BLUE}opencode${NC} or ${BLUE}oc${NC}"
+echo -e "Or from Termux:    ${BLUE}opencode-proot${NC} or ${BLUE}ocp${NC}"
+echo ""
 SETUP_SCRIPT
 
 # Replace placeholders
