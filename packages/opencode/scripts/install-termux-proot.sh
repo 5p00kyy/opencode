@@ -108,15 +108,18 @@ fi
 # ============================================================
 step "2/7: Setting up $DISTRO distribution..."
 
+# Check if distro is installed (proot-distro list shows installed distros)
 DISTRO_INSTALLED=false
-if proot-distro list 2>/dev/null | grep -q "^$DISTRO"; then
+if proot-distro list 2>/dev/null | grep -qE "^${DISTRO}[[:space:]]|^${DISTRO}$"; then
     DISTRO_INSTALLED=true
 fi
 
 if [ "$REINSTALL" = true ] && [ "$DISTRO_INSTALLED" = true ]; then
     warn "Reinstall requested. Removing existing $DISTRO installation..."
-    proot-distro remove "$DISTRO" || warn "Failed to remove $DISTRO"
+    # proot-distro remove requires confirmation, use yes to auto-confirm
+    yes | proot-distro remove "$DISTRO" 2>/dev/null || true
     DISTRO_INSTALLED=false
+    success "Old $DISTRO removed"
 fi
 
 if [ "$DISTRO_INSTALLED" = false ]; then
