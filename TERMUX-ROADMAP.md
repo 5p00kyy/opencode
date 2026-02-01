@@ -353,12 +353,17 @@ ocp-shell                   # Short for opencode-proot shell
 # Install proot-distro
 pkg install proot-distro
 
-# Install Ubuntu
-proot-distro install ubuntu
-proot-distro login ubuntu
+# Install Arch Linux (recommended for 64-bit only devices like Pixel 8)
+proot-distro install archlinux
+proot-distro login archlinux
 
-# Inside Ubuntu, install Bun and OpenCode
+# Inside Arch, install packages
+pacman -Syu --noconfirm
+pacman -S --noconfirm base-devel git curl ripgrep fd
+
+# Install Bun and OpenCode
 curl -fsSL https://bun.sh/install | bash
+export PATH="$HOME/.bun/bin:$PATH"
 git clone https://github.com/5p00kyy/opencode
 cd opencode && git checkout termux-arm64
 bun install
@@ -377,10 +382,12 @@ opencode serve --port 4096
 
 ### Comparison
 
-| Method             | TUI    | MCP        | Performance | Disk Space |
-| ------------------ | ------ | ---------- | ----------- | ---------- |
-| PRoot (Option 1/2) | ✅ Yes | ✅ Yes     | ~70-80%     | ~1.5GB     |
-| Node.js (Option 3) | ❌ No  | ⚠️ Limited | ~90%        | ~300MB     |
+| Method               | TUI    | MCP        | Performance | Disk Space |
+| -------------------- | ------ | ---------- | ----------- | ---------- |
+| PRoot Arch (Default) | ✅ Yes | ✅ Yes     | ~70-80%     | ~800MB     |
+| Node.js (Headless)   | ❌ No  | ⚠️ Limited | ~90%        | ~300MB     |
+
+**Note:** Arch Linux is the default distro, optimized for 64-bit only devices (Pixel 6+). Use `--distro=ubuntu` if you prefer Ubuntu.
 
 ---
 

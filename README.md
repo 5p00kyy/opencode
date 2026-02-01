@@ -111,7 +111,8 @@ opencode serve --port 4096  # Headless API server only
 ```
 
 > [!NOTE]
-> PRoot has ~20-30% performance overhead but provides full Bun support.
+> PRoot uses Arch Linux by default (optimized for 64-bit only devices like Pixel 6+).
+> Has ~20-30% performance overhead but provides full Bun support including TUI.
 > See [TERMUX-ROADMAP.md](TERMUX-ROADMAP.md) for development status.
 
 ### Agents

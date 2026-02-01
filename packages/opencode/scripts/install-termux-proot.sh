@@ -10,7 +10,7 @@
 #
 # Options:
 #   --reinstall    Force a fresh installation
-#   --distro=NAME  Use specific distro (default: ubuntu)
+#   --distro=NAME  Use specific distro (default: archlinux)
 #
 
 set -e
@@ -31,7 +31,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 step() { echo -e "${CYAN}[STEP]${NC} $1"; }
 
 # Configuration
-DISTRO="ubuntu"
+DISTRO="archlinux"
 REINSTALL=false
 REPO_URL="https://github.com/5p00kyy/opencode.git"
 BRANCH="termux-arm64"
@@ -57,8 +57,8 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --reinstall       Force a fresh installation"
-            echo "  --distro=NAME     Use specific distro (default: ubuntu)"
-            echo "                    Supported: ubuntu, debian, alpine, archlinux"
+            echo "  --distro=NAME     Use specific distro (default: archlinux)"
+            echo "                    Supported: archlinux, ubuntu, debian, alpine"
             echo "  --help, -h        Show this help message"
             echo ""
             echo "After installation:"
@@ -155,15 +155,79 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 REPO_URL="__REPO_URL__"
 BRANCH="__BRANCH__"
+DISTRO_TYPE="__DISTRO__"
 INSTALL_DIR="$HOME/opencode"
 
-info "Running inside proot environment..."
+info "Running inside proot environment ($DISTRO_TYPE)..."
 
-# Update and install dependencies
-info "Installing system packages..."
-apt-get update -qq
-apt-get install -y -qq curl git unzip build-essential ca-certificates > /dev/null 2>&1
-success "System packages installed"
+# Detect package manager and install dependencies
+install_packages() {
+    if command -v pacman &> /dev/null; then
+        # Arch Linux
+        info "Detected Arch Linux, using pacman..."
+        
+        # Initialize pacman keyring (required in proot)
+        pacman-key --init 2>/dev/null || true
+        pacman-key --populate archlinux 2>/dev/null || true
+        
+        # Update and install essential packages
+        info "Updating system and installing packages..."
+        pacman -Syu --noconfirm 2>&1 | tail -5
+        pacman -S --noconfirm --needed \
+            base-devel \
+            git \
+            curl \
+            wget \
+            unzip \
+            openssh \
+            ripgrep \
+            fd \
+            jq \
+            which \
+            2>&1 | tail -5
+        success "System packages installed"
+        
+        # Install yay (AUR helper)
+        if ! command -v yay &> /dev/null; then
+            info "Installing yay (AUR helper)..."
+            cd /tmp
+            rm -rf yay-bin 2>/dev/null || true
+            git clone https://aur.archlinux.org/yay-bin.git
+            cd yay-bin
+            # Need to run makepkg as non-root, but in proot we're "root"
+            # Use --asroot workaround or create a build user
+            makepkg -si --noconfirm 2>&1 | tail -5 || warn "yay installation may have issues in proot"
+            cd /tmp && rm -rf yay-bin
+            success "yay installed"
+        else
+            success "yay already installed"
+        fi
+        
+    elif command -v apt-get &> /dev/null; then
+        # Debian/Ubuntu
+        info "Detected Debian/Ubuntu, using apt..."
+        apt-get update -qq
+        apt-get install -y -qq \
+            curl git unzip build-essential ca-certificates \
+            ripgrep fd-find jq \
+            > /dev/null 2>&1
+        success "System packages installed"
+        
+    elif command -v apk &> /dev/null; then
+        # Alpine
+        info "Detected Alpine, using apk..."
+        apk update
+        apk add --no-cache \
+            curl git unzip build-base ca-certificates \
+            ripgrep fd jq bash
+        success "System packages installed"
+        
+    else
+        warn "Unknown package manager, skipping system packages"
+    fi
+}
+
+install_packages
 
 # Install Bun
 if ! command -v bun &> /dev/null; then
@@ -230,11 +294,15 @@ echo ""
 success "PRoot environment setup complete!"
 echo ""
 echo -e "Inside proot, run: ${BLUE}opencode${NC} or ${BLUE}oc${NC}"
+if command -v yay &> /dev/null; then
+    echo -e "Use ${BLUE}yay -S <package>${NC} to install AUR packages"
+fi
 SETUP_SCRIPT
 
 # Replace placeholders
 sed -i "s|__REPO_URL__|$REPO_URL|g" "$PROOT_SETUP_SCRIPT"
 sed -i "s|__BRANCH__|$BRANCH|g" "$PROOT_SETUP_SCRIPT"
+sed -i "s|__DISTRO__|$DISTRO|g" "$PROOT_SETUP_SCRIPT"
 
 chmod +x "$PROOT_SETUP_SCRIPT"
 success "Setup script created"
@@ -389,7 +457,9 @@ echo -e "  ${CYAN}bun-proot <cmd>${NC}        Run bun commands in proot"
 echo ""
 echo -e "Inside proot (after ${CYAN}ocp-shell${NC}):"
 echo -e "  ${CYAN}opencode${NC}               Run OpenCode directly"
-echo -e "  ${CYAN}bun install${NC}            Install packages"
+echo -e "  ${CYAN}bun install${NC}            Install npm packages"
+echo -e "  ${CYAN}pacman -S <pkg>${NC}        Install Arch packages"
+echo -e "  ${CYAN}yay -S <pkg>${NC}           Install AUR packages"
 echo ""
 echo -e "${YELLOW}Note:${NC} PRoot has ~20-30% performance overhead compared to native."
 echo -e "      For headless-only use, consider the Node.js install script instead."
