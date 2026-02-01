@@ -292,22 +292,27 @@ info "Installing npm dependencies (this may take several minutes)..."
 
 cd "$INSTALL_DIR"
 
+# IMPORTANT: Use --backend=copyfile on Android/proot
+# SELinux blocks hardlinks, causing PermissionDenied errors without this flag
+BUN_BACKEND="--backend=copyfile"
+
 # Clear bun cache to avoid stale dependency issues
 info "Clearing bun cache..."
 rm -rf "$HOME/.bun/install/cache" 2>/dev/null || true
 
-# Run bun install from the repo root
-bun install 2>&1 | tail -10
+# Run bun install with copyfile backend
+info "Running bun install (using copyfile backend for Android compatibility)..."
+bun install $BUN_BACKEND 2>&1 | tail -15
 
 if [ $? -ne 0 ]; then
     warn "bun install had issues, trying again..."
-    bun install 2>&1 | tail -10
+    bun install $BUN_BACKEND 2>&1 | tail -15
 fi
 
 # @babel/core is required by @opentui/solid but often not resolved in monorepos
 # Install it explicitly at the root level
 info "Installing @babel/core (required by @opentui/solid)..."
-bun add @babel/core@latest -d 2>&1 | tail -3
+bun add @babel/core@latest -d $BUN_BACKEND 2>&1 | tail -3
 
 # Verify it was installed
 if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
@@ -315,7 +320,7 @@ if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
 else
     warn "@babel/core not at root, trying packages/opencode..."
     cd "$INSTALL_DIR/packages/opencode"
-    bun add @babel/core@latest -d 2>&1 | tail -3
+    bun add @babel/core@latest -d $BUN_BACKEND 2>&1 | tail -3
 fi
 
 success "Dependencies installed"
