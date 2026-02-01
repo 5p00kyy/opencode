@@ -7,6 +7,9 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux.sh | bash
 #
+# Options:
+#   --reinstall    Force a fresh installation (removes existing installation)
+#
 
 set -e
 
@@ -23,12 +26,35 @@ success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+# Parse arguments
+REINSTALL=false
+for arg in "$@"; do
+    case $arg in
+        --reinstall)
+            REINSTALL=true
+            shift
+            ;;
+        --help|-h)
+            echo "OpenCode Termux Installation Script"
+            echo ""
+            echo "Usage:"
+            echo "  curl -fsSL <url> | bash"
+            echo "  curl -fsSL <url> | bash -s -- --reinstall"
+            echo ""
+            echo "Options:"
+            echo "  --reinstall    Force a fresh installation (removes existing)"
+            echo "  --help, -h     Show this help message"
+            exit 0
+            ;;
+    esac
+done
+
 # Banner
 echo ""
-echo -e "${BLUE}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║${NC}          ${GREEN}OpenCode Termux Installation${NC}                    ${BLUE}║${NC}"
-echo -e "${BLUE}║${NC}          ARM64 Native Support                           ${BLUE}║${NC}"
-echo -e "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}+----------------------------------------------------------+${NC}"
+echo -e "${BLUE}|${NC}          ${GREEN}OpenCode Termux Installation${NC}                    ${BLUE}|${NC}"
+echo -e "${BLUE}|${NC}          ARM64 Native Support                           ${BLUE}|${NC}"
+echo -e "${BLUE}+----------------------------------------------------------+${NC}"
 echo ""
 
 # Check if running in Termux
@@ -40,6 +66,17 @@ fi
 INSTALL_DIR="$HOME/opencode"
 REPO_URL="https://github.com/5p00kyy/opencode.git"
 BRANCH="termux-arm64"
+
+# Handle --reinstall flag
+if [ "$REINSTALL" = true ] && [ -d "$INSTALL_DIR" ]; then
+    warn "Reinstall requested. Removing existing installation..."
+    rm -rf "$INSTALL_DIR"
+    # Also remove old launcher
+    rm -f "$HOME/.local/bin/opencode" 2>/dev/null || true
+    rm -f "$HOME/bin/opencode" 2>/dev/null || true
+    rm -f "$PREFIX/bin/opencode" 2>/dev/null || true
+    success "Old installation removed"
+fi
 
 # Step 1: Update package repositories
 info "Updating package repositories..."
@@ -67,18 +104,31 @@ success "Optional packages installed"
 # Step 5: Clone or update the repository
 if [ -d "$INSTALL_DIR" ]; then
     info "Updating existing OpenCode installation..."
-    cd "$INSTALL_DIR"
-    git fetch origin "$BRANCH"
-    git checkout "$BRANCH"
-    git pull origin "$BRANCH"
+    cd "$INSTALL_DIR" || error "Failed to enter installation directory"
+    git fetch origin "$BRANCH" || error "Failed to fetch updates"
+    git checkout "$BRANCH" || error "Failed to checkout branch"
+    git pull origin "$BRANCH" || error "Failed to pull updates"
     success "OpenCode updated"
 else
     info "Cloning OpenCode repository..."
-    git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR" || error "Failed to clone repository"
+    git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    if [ $? -ne 0 ]; then
+        error "Failed to clone repository"
+    fi
+    # Verify clone succeeded
+    if [ ! -d "$INSTALL_DIR/.git" ]; then
+        error "Git clone failed - .git directory not found"
+    fi
     success "OpenCode cloned"
 fi
 
-cd "$INSTALL_DIR/packages/opencode"
+# Verify critical files exist
+if [ ! -f "$INSTALL_DIR/packages/opencode/src/index.ts" ]; then
+    error "Clone verification failed - source files not found at $INSTALL_DIR/packages/opencode/src/index.ts"
+fi
+success "Clone verification passed"
+
+cd "$INSTALL_DIR/packages/opencode" || error "Failed to enter packages/opencode directory"
 
 # Step 6: Use Termux-compatible package.json files (pre-resolved catalog: and workspace: references)
 info "Setting up Termux-compatible package.json files..."
@@ -111,7 +161,7 @@ if [ -f "$INSTALL_DIR/package.json" ]; then
 fi
 
 # Step 8: Install npm dependencies
-info "Installing npm dependencies..."
+info "Installing npm dependencies (this may take a few minutes)..."
 npm install --legacy-peer-deps 2>&1 | tail -20 || {
     warn "Standard install failed, trying with --force..."
     npm install --force 2>&1 | tail -20 || error "Failed to install dependencies"
@@ -161,13 +211,25 @@ else
 fi
 rm -f "$TEST_LOG" 2>/dev/null || true
 
-# Step 13: Create launcher script
+# Step 13: Verify installation directory before creating launcher
+if [ ! -d "$INSTALL_DIR/packages/opencode" ]; then
+    error "Installation directory not found at $INSTALL_DIR/packages/opencode"
+fi
+
+if [ ! -f "$INSTALL_DIR/packages/opencode/src/index.ts" ]; then
+    error "Entry point not found at $INSTALL_DIR/packages/opencode/src/index.ts"
+fi
+
+# Step 14: Create launcher script
 info "Creating launcher script..."
 
 # Ensure PREFIX is set (should be /data/data/com.termux/files/usr on Termux)
 if [ -z "$PREFIX" ]; then
     PREFIX="/data/data/com.termux/files/usr"
 fi
+
+# Resolve absolute path for INSTALL_DIR (in case $HOME has symlinks)
+RESOLVED_INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
 
 # Try user directories first (more likely to succeed), then system directories
 LAUNCHER_CREATED=false
@@ -178,10 +240,23 @@ for BIN_DIR in "$HOME/.local/bin" "$HOME/bin" "$PREFIX/bin"; do
     LAUNCHER="$BIN_DIR/opencode"
     
     # Try to create the launcher file using a subshell to capture all errors
-    if ( echo '#!/data/data/com.termux/files/usr/bin/bash' > "$LAUNCHER" ) 2>/dev/null; then
-        echo '# OpenCode Launcher for Termux' >> "$LAUNCHER"
-        echo 'cd "$HOME/opencode/packages/opencode"' >> "$LAUNCHER"
-        echo 'exec npx tsx ./src/index.ts "$@"' >> "$LAUNCHER"
+    # Use the resolved absolute path, not $HOME expansion
+    if ( cat > "$LAUNCHER" << 'LAUNCHER_EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+# OpenCode Launcher for Termux
+LAUNCHER_EOF
+    ) 2>/dev/null; then
+        # Append the dynamic parts (these expand at install time, not runtime)
+        echo "OPENCODE_DIR=\"$RESOLVED_INSTALL_DIR/packages/opencode\"" >> "$LAUNCHER"
+        cat >> "$LAUNCHER" << 'LAUNCHER_EOF'
+if [ ! -d "$OPENCODE_DIR" ]; then
+    echo "Error: OpenCode directory not found at $OPENCODE_DIR"
+    echo "Please reinstall with: curl -fsSL https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux.sh | bash -s -- --reinstall"
+    exit 1
+fi
+cd "$OPENCODE_DIR" || exit 1
+exec npx tsx ./src/index.ts "$@"
+LAUNCHER_EOF
         chmod +x "$LAUNCHER" 2>/dev/null
         success "Launcher created at $LAUNCHER"
         LAUNCHER_CREATED=true
@@ -205,7 +280,7 @@ if [ "$LAUNCHER_CREATED" = false ]; then
     warn "  cd $INSTALL_DIR/packages/opencode && npx tsx ./src/index.ts"
 fi
 
-# Step 14: Create alias in shell config
+# Step 15: Create alias in shell config
 if [ "$LAUNCHER_CREATED" = true ]; then
     info "Adding shell alias..."
     SHELL_RC="$HOME/.bashrc"
@@ -225,9 +300,9 @@ fi
 
 # Done!
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║${NC}          Installation Complete!                          ${GREEN}║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}+----------------------------------------------------------+${NC}"
+echo -e "${GREEN}|${NC}          Installation Complete!                          ${GREEN}|${NC}"
+echo -e "${GREEN}+----------------------------------------------------------+${NC}"
 echo ""
 echo -e "To start OpenCode:"
 echo -e "  ${BLUE}opencode${NC}        # Full command"
@@ -238,6 +313,8 @@ echo -e "  ${BLUE}cd $INSTALL_DIR/packages/opencode${NC}"
 echo -e "  ${BLUE}npx tsx ./src/index.ts${NC}"
 echo ""
 echo -e "For help: ${BLUE}opencode --help${NC}"
+echo ""
+echo -e "To reinstall: ${BLUE}curl -fsSL <url> | bash -s -- --reinstall${NC}"
 echo ""
 
 # Offer to restart shell
