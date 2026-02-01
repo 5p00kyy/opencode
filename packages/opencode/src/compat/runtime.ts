@@ -188,3 +188,33 @@ export interface SystemError extends Error {
   errno?: number
   path?: string
 }
+
+// Lazy-loaded string-width for Node.js
+let stringWidthFn: ((str: string) => number) | null = null
+
+/**
+ * Calculate the visual width of a string - works like Bun.stringWidth()
+ * Handles Unicode characters, emojis, CJK characters, etc.
+ */
+export function stringWidth(str: string): number {
+  if (isBun) {
+    return (globalThis as any).Bun.stringWidth(str)
+  }
+  
+  // Node.js implementation using string-width package
+  if (!stringWidthFn) {
+    try {
+      // Dynamic import of string-width (ESM package)
+      const mod = require("string-width")
+      stringWidthFn = mod.default || mod
+    } catch {
+      // Fallback: count characters (basic, doesn't handle wide chars)
+      stringWidthFn = (s: string) => {
+        // Simple fallback - strip ANSI codes and count
+        const stripped = s.replace(/\x1b\[[0-9;]*m/g, "")
+        return stripped.length
+      }
+    }
+  }
+  return stringWidthFn(str)
+}

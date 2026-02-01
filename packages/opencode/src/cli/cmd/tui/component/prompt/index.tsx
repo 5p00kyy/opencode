@@ -31,6 +31,7 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { useTextareaKeybindings } from "../textarea-keybindings"
+import { stringWidth } from "@/compat"
 
 export type PromptProps = {
   sessionID?: string
@@ -312,7 +313,7 @@ export function Prompt(props: PromptProps) {
             parts: updatedNonTextParts,
           })
           restoreExtmarksFromParts(updatedNonTextParts)
-          input.cursorOffset = Bun.stringWidth(content)
+          input.cursorOffset = stringWidth(content)
         },
       },
     ]

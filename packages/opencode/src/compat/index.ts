@@ -14,7 +14,7 @@
  */
 
 // Runtime detection and utilities
-export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep, hash, stdin, stderr, stdout, color, type SystemError, arch, isArm64, isArm, isX64, platform, isLinux, isDarwin, isWindows, isArmLinux } from "./runtime"
+export { isBun, isNode, runtime, isTermux, termuxPrefix, termuxHome, tmpdir, which, sleep, hash, stdin, stderr, stdout, color, stringWidth, type SystemError, arch, isArm64, isArm, isX64, platform, isLinux, isDarwin, isWindows, isArmLinux } from "./runtime"
 
 // File operations (replaces Bun.file, Bun.write)
 export { file, write, type FileHandle } from "./file"

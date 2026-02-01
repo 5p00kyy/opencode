@@ -13,6 +13,7 @@ import {
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import path from "path"
+import { write } from "@/compat"
 import { useRoute, useRouteData } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
 import { SplitBorder } from "@tui/component/border"
@@ -813,12 +814,12 @@ export function Session() {
             const filename = options.filename.trim()
             const filepath = path.join(exportDir, filename)
 
-            await Bun.write(filepath, transcript)
+            await write(filepath, transcript)
 
             // Open with EDITOR if available
             const result = await Editor.open({ value: transcript, renderer })
             if (result !== undefined) {
-              await Bun.write(filepath, result)
+              await write(filepath, result)
             }
 
             toast.show({ message: `Session exported to ${filename}`, variant: "success" })
