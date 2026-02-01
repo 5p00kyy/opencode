@@ -313,8 +313,9 @@ cd "$INSTALL_DIR"
 # SELinux blocks hardlinks, causing PermissionDenied errors without this flag
 BUN_FLAGS="--backend=copyfile"
 
-# Clear bun cache to avoid stale dependency issues
-info "Clearing bun cache..."
+# Clean slate - remove existing node_modules and bun cache
+info "Cleaning existing installations..."
+rm -rf "$INSTALL_DIR/node_modules" 2>/dev/null || true
 rm -rf "$HOME/.bun/install/cache" 2>/dev/null || true
 
 # Run bun install with copyfile backend (use absolute path)
@@ -326,10 +327,18 @@ if [ $? -ne 0 ]; then
     "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
 fi
 
-# @babel/core is required by @opentui/solid but often not resolved in monorepos
-# Install it explicitly at the root level
-info "Installing @babel/core (required by @opentui/solid)..."
-"$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
+# Fix monorepo dependency issues - these packages need to be explicitly installed
+# because bun's module resolution in monorepos can miss transitive dependencies
+info "Installing commonly missing dependencies..."
+
+# Install at root level
+"$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 $BUN_FLAGS 2>&1 | tail -3
+
+# Install at packages/opencode level as well for proper resolution
+cd "$INSTALL_DIR/packages/opencode"
+"$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 @babel/core@latest $BUN_FLAGS 2>&1 | tail -3
+
+cd "$INSTALL_DIR"
 
 # Verify OpenTUI native library was installed for the correct architecture
 info "Verifying OpenTUI native library installation..."
@@ -366,26 +375,20 @@ else
     warn "libopentui.so not found in node_modules - TUI may not work!"
 fi
 
-# Verify @babel/core was installed
-if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
-    success "@babel/core installed at root"
-else
-    warn "@babel/core not at root, trying packages/opencode..."
+# Verify critical packages installed
+info "Verifying critical dependencies..."
+MISSING_DEPS=""
+for pkg in debug @babel/core; do
+    if [ ! -d "$INSTALL_DIR/node_modules/$pkg" ] && [ ! -d "$INSTALL_DIR/packages/opencode/node_modules/$pkg" ]; then
+        MISSING_DEPS="$MISSING_DEPS $pkg"
+    fi
+done
+
+if [ -n "$MISSING_DEPS" ]; then
+    warn "Some dependencies missing:$MISSING_DEPS"
+    warn "Attempting to install them..."
     cd "$INSTALL_DIR/packages/opencode"
-    "$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
-fi
-
-# Install 'debug' package - required by @babel/core but often missing in monorepos
-info "Installing 'debug' package (required by @babel/core)..."
-cd "$INSTALL_DIR"
-"$BUN_BIN" add debug@latest $BUN_FLAGS 2>&1 | tail -3
-
-# Verify debug was installed
-if [ -d "$INSTALL_DIR/node_modules/debug" ]; then
-    success "debug package installed"
-else
-    warn "debug not at root, trying explicit install..."
-    "$BUN_BIN" add debug@4.3.4 $BUN_FLAGS 2>&1 | tail -3
+    "$BUN_BIN" add $MISSING_DEPS $BUN_FLAGS 2>&1 | tail -5
 fi
 
 success "Dependencies installed"
