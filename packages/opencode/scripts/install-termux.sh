@@ -286,7 +286,8 @@ if [ ! -d "$OPENCODE_DIR" ]; then
     exit 1
 fi
 cd "$OPENCODE_DIR" || exit 1
-exec npx tsx ./src/index.ts "$@"
+# Use custom loader for .txt imports (Bun feature not in Node.js)
+exec node --import ./src/compat/loader.mjs --import tsx ./src/index.ts "$@"
 LAUNCHER_EOF
         chmod +x "$LAUNCHER" 2>/dev/null
         success "Launcher created at $LAUNCHER"
@@ -308,7 +309,7 @@ done
 if [ "$LAUNCHER_CREATED" = false ]; then
     warn "Could not create launcher in any standard location"
     warn "You can run OpenCode manually with:"
-    warn "  cd $INSTALL_DIR/packages/opencode && npx tsx ./src/index.ts"
+    warn "  cd $INSTALL_DIR/packages/opencode && node --import ./src/compat/loader.mjs --import tsx ./src/index.ts"
 fi
 
 # Step 16: Create alias in shell config
@@ -341,7 +342,7 @@ echo -e "  ${BLUE}oc${NC}              # Short alias (after restarting shell)"
 echo ""
 echo -e "Or run from the installation directory:"
 echo -e "  ${BLUE}cd $INSTALL_DIR/packages/opencode${NC}"
-echo -e "  ${BLUE}npx tsx ./src/index.ts${NC}"
+echo -e "  ${BLUE}node --import ./src/compat/loader.mjs --import tsx ./src/index.ts${NC}"
 echo ""
 echo -e "For help: ${BLUE}opencode --help${NC}"
 echo ""
