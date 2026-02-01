@@ -331,6 +331,41 @@ fi
 info "Installing @babel/core (required by @opentui/solid)..."
 "$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
 
+# Verify OpenTUI native library was installed for the correct architecture
+info "Verifying OpenTUI native library installation..."
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    OPENTUI_NATIVE="$INSTALL_DIR/node_modules/@opentui/core-linux-arm64"
+    OPENTUI_BUN="$INSTALL_DIR/node_modules/.bun/node_modules/@opentui/core-linux-arm64"
+    EXPECTED_ARCH="linux-arm64"
+else
+    OPENTUI_NATIVE="$INSTALL_DIR/node_modules/@opentui/core-linux-x64"
+    OPENTUI_BUN="$INSTALL_DIR/node_modules/.bun/node_modules/@opentui/core-linux-x64"
+    EXPECTED_ARCH="linux-x64"
+fi
+
+# Check both possible locations
+if [ -d "$OPENTUI_NATIVE" ]; then
+    success "OpenTUI native library found at $OPENTUI_NATIVE"
+    ls -la "$OPENTUI_NATIVE"/*.so 2>/dev/null || true
+elif [ -d "$OPENTUI_BUN" ]; then
+    success "OpenTUI native library found at $OPENTUI_BUN"
+    ls -la "$OPENTUI_BUN"/*.so 2>/dev/null || true
+else
+    warn "OpenTUI native library for $EXPECTED_ARCH not found!"
+    warn "Attempting to install it explicitly..."
+    "$BUN_BIN" add @opentui/core-linux-arm64@0.1.75 $BUN_FLAGS 2>&1 | tail -5
+fi
+
+# Double-check the .so file exists and is valid
+SO_FILE=$(find "$INSTALL_DIR/node_modules" -name "libopentui.so" -type f 2>/dev/null | head -1)
+if [ -n "$SO_FILE" ]; then
+    success "Native library found: $SO_FILE"
+    file "$SO_FILE" 2>/dev/null || ls -la "$SO_FILE"
+else
+    warn "libopentui.so not found in node_modules - TUI may not work!"
+fi
+
 # Verify it was installed
 if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
     success "@babel/core installed at root"
@@ -481,6 +516,31 @@ export OTUI_DEBUG=true
 export OTUI_SHOW_STATS=true
 '
 
+# Minimal TUI test script
+MINIMAL_TUI_TEST='
+import { createCliRenderer } from "@opentui/core";
+console.log("Creating CLI renderer...");
+try {
+    const renderer = await createCliRenderer({
+        width: 80,
+        height: 24,
+        useAlternateScreen: false,
+        exitOnCtrlC: true,
+    });
+    console.log("Renderer created successfully!");
+    console.log("Terminal size:", renderer.width, "x", renderer.height);
+    setTimeout(() => {
+        console.log("Destroying renderer...");
+        renderer.destroy();
+        console.log("Test complete - TUI works!");
+        process.exit(0);
+    }, 2000);
+} catch (e) {
+    console.error("Failed to create renderer:", e);
+    process.exit(1);
+}
+'
+
 # Check if proot-distro is available
 if ! command -v proot-distro &> /dev/null; then
     echo "Error: proot-distro not found. Please reinstall."
@@ -511,9 +571,79 @@ case "$1" in
         exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts serve $ARGS"
         ;;
     test-tui)
-        # Test if TUI can initialize - useful for debugging
-        echo "Testing TUI initialization..."
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV cd ~/opencode/packages/opencode && echo 'Checking OpenTUI native module...' && ls -la node_modules/@opentui/core-linux-arm64/ 2>/dev/null || echo 'OpenTUI linux-arm64 not found' && echo 'Testing bun...' && ~/.bun/bin/bun --version && echo 'Starting OpenCode with debug...' && ~/.bun/bin/bun run --conditions=browser ./src/index.ts --help"
+        # Comprehensive TUI diagnostic test
+        echo "=== OpenCode TUI Diagnostic Test ==="
+        exec proot-distro login "$DISTRO" -- bash -c '
+            echo "1. System Info:"
+            echo "   Architecture: $(uname -m)"
+            echo "   Platform: $(uname -s)"
+            echo ""
+            echo "2. Bun Info:"
+            ~/.bun/bin/bun --version
+            echo ""
+            echo "3. OpenTUI Native Library Check:"
+            cd ~/opencode
+            # Check for arm64 library
+            if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
+                echo "   [OK] @opentui/core-linux-arm64 found"
+                ls -la node_modules/@opentui/core-linux-arm64/
+            elif [ -d "node_modules/.bun/node_modules/@opentui/core-linux-arm64" ]; then
+                echo "   [OK] @opentui/core-linux-arm64 found in .bun"
+                ls -la node_modules/.bun/node_modules/@opentui/core-linux-arm64/
+            else
+                echo "   [ERROR] @opentui/core-linux-arm64 NOT FOUND!"
+                echo "   Available @opentui packages:"
+                find node_modules -name "@opentui" -type d 2>/dev/null | head -5
+            fi
+            echo ""
+            echo "4. libopentui.so Check:"
+            SO_FILE=$(find node_modules -name "libopentui.so" -type f 2>/dev/null | head -1)
+            if [ -n "$SO_FILE" ]; then
+                echo "   [OK] Found: $SO_FILE"
+                file "$SO_FILE" 2>/dev/null || echo "   (file command not available)"
+            else
+                echo "   [ERROR] libopentui.so NOT FOUND!"
+            fi
+            echo ""
+            echo "5. FFI Test (quick import check):"
+            cd packages/opencode
+            ~/.bun/bin/bun -e "
+                console.log(\"   Importing @opentui/core...\");
+                try {
+                    const core = await import(\"@opentui/core\");
+                    console.log(\"   [OK] @opentui/core loaded successfully\");
+                    console.log(\"   Available exports:\", Object.keys(core).slice(0, 10).join(\", \"), \"...\");
+                } catch (e) {
+                    console.log(\"   [ERROR] Failed to load @opentui/core:\", e.message);
+                }
+            " 2>&1
+            echo ""
+            echo "6. OpenCode --help:"
+            ~/.bun/bin/bun run --conditions=browser ./src/index.ts --help 2>&1 | head -20
+            echo ""
+            echo "=== Diagnostic Complete ==="
+        '
+        ;;
+    tui-minimal)
+        # Test minimal TUI creation
+        echo "=== Minimal TUI Test ==="
+        echo "This will try to create a basic TUI renderer..."
+        exec proot-distro login "$DISTRO" -- bash -c "
+            $OPENTUI_ENV
+            $DEBUG_ENV
+            cd ~/opencode/packages/opencode
+            ~/.bun/bin/bun -e '$MINIMAL_TUI_TEST'
+        "
+        ;;
+    reinstall)
+        # Reinstall dependencies
+        echo "Reinstalling dependencies..."
+        exec proot-distro login "$DISTRO" -- bash -c "
+            $OPENTUI_ENV
+            cd ~/opencode
+            rm -rf node_modules
+            ~/.bun/bin/bun install --backend=copyfile
+        "
         ;;
     *)
         # Run OpenCode with arguments
