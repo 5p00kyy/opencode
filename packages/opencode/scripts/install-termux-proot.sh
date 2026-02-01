@@ -366,13 +366,26 @@ else
     warn "libopentui.so not found in node_modules - TUI may not work!"
 fi
 
-# Verify it was installed
+# Verify @babel/core was installed
 if [ -d "$INSTALL_DIR/node_modules/@babel/core" ]; then
     success "@babel/core installed at root"
 else
     warn "@babel/core not at root, trying packages/opencode..."
     cd "$INSTALL_DIR/packages/opencode"
     "$BUN_BIN" add @babel/core@latest -d $BUN_FLAGS 2>&1 | tail -3
+fi
+
+# Install 'debug' package - required by @babel/core but often missing in monorepos
+info "Installing 'debug' package (required by @babel/core)..."
+cd "$INSTALL_DIR"
+"$BUN_BIN" add debug@latest $BUN_FLAGS 2>&1 | tail -3
+
+# Verify debug was installed
+if [ -d "$INSTALL_DIR/node_modules/debug" ]; then
+    success "debug package installed"
+else
+    warn "debug not at root, trying explicit install..."
+    "$BUN_BIN" add debug@4.3.4 $BUN_FLAGS 2>&1 | tail -3
 fi
 
 success "Dependencies installed"
