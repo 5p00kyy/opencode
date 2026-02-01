@@ -6,11 +6,8 @@ import { Log } from "../util/log"
 import { FileIgnore } from "./ignore"
 import { Config } from "../config/config"
 import path from "path"
-// @ts-ignore
-import { createWrapper } from "@parcel/watcher/wrapper"
 import { lazy } from "@/util/lazy"
 import { withTimeout } from "@/util/timeout"
-import type ParcelWatcher from "@parcel/watcher"
 import { $ } from "../compat"
 import { Flag } from "@/flag/flag"
 import { readdir } from "fs/promises"
@@ -18,6 +15,14 @@ import { readdir } from "fs/promises"
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
 declare const OPENCODE_LIBC: string | undefined
+
+// Type definitions for @parcel/watcher (used when available)
+type ParcelWatcherModule = typeof import("@parcel/watcher")
+type SubscribeCallback = (
+  err: Error | null,
+  events: Array<{ type: "create" | "update" | "delete"; path: string }>
+) => void
+type AsyncSubscription = { unsubscribe: () => Promise<void> }
 
 export namespace FileWatcher {
   const log = Log.create({ service: "file.watcher" })
@@ -32,14 +37,16 @@ export namespace FileWatcher {
     ),
   }
 
-  const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
+  const watcher = lazy((): ParcelWatcherModule | undefined => {
     try {
+      // Dynamic require to avoid module-not-found errors when @parcel/watcher isn't installed
+      const createWrapper = require("@parcel/watcher/wrapper").createWrapper
       const binding = require(
         `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${OPENCODE_LIBC || "glibc"}` : ""}`,
       )
-      return createWrapper(binding) as typeof import("@parcel/watcher")
+      return createWrapper(binding) as ParcelWatcherModule
     } catch (error) {
-      log.error("failed to load watcher binding", { error })
+      log.info("file watcher not available", { error: (error as Error).message })
       return
     }
   })
@@ -63,7 +70,7 @@ export namespace FileWatcher {
       const w = watcher()
       if (!w) return {}
 
-      const subscribe: ParcelWatcher.SubscribeCallback = (err, evts) => {
+      const subscribe: SubscribeCallback = (err, evts) => {
         if (err) return
         for (const evt of evts) {
           if (evt.type === "create") Bus.publish(Event.Updated, { file: evt.path, event: "add" })
@@ -72,7 +79,7 @@ export namespace FileWatcher {
         }
       }
 
-      const subs: ParcelWatcher.AsyncSubscription[] = []
+      const subs: AsyncSubscription[] = []
       const cfgIgnores = cfg.watcher?.ignore ?? []
 
       if (Flag.OPENCODE_EXPERIMENTAL_FILEWATCHER) {
