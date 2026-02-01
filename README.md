@@ -90,6 +90,30 @@ OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bas
 XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
 ```
 
+### Termux (Android ARM64)
+
+OpenCode can run on Android via Termux. Two installation methods are available:
+
+```bash
+# Option 1: Full support via PRoot (recommended)
+# Includes TUI, MCP servers, and all features
+curl -fsSL https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux-proot.sh | bash
+
+# After install:
+opencode-proot              # Launch OpenCode
+opencode-proot serve        # Headless API server
+
+# Option 2: Lightweight Node.js mode (headless only)
+curl -fsSL https://raw.githubusercontent.com/5p00kyy/opencode/termux-arm64/packages/opencode/scripts/install-termux.sh | bash
+
+# After install:
+opencode serve --port 4096  # Headless API server only
+```
+
+> [!NOTE]
+> PRoot has ~20-30% performance overhead but provides full Bun support.
+> See [TERMUX-ROADMAP.md](TERMUX-ROADMAP.md) for development status.
+
 ### Agents
 
 OpenCode includes two built-in agents you can switch between with the `Tab` key.

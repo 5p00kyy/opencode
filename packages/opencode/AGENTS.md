@@ -1,27 +1,170 @@
-# opencode agent guidelines
+# OpenCode Package - Agent Guidelines
 
-## Build/Test Commands
+## Quick Reference
 
-- **Install**: `bun install`
-- **Run**: `bun run --conditions=browser ./src/index.ts`
-- **Typecheck**: `bun run typecheck` (npm run typecheck)
-- **Test**: `bun test` (runs all tests)
-- **Single test**: `bun test test/tool/tool.test.ts` (specific test file)
+```bash
+# Run (development)
+bun run --conditions=browser ./src/index.ts
 
-## Code Style
+# Typecheck (uses tsgo for speed)
+bun run typecheck
 
-- **Runtime**: Bun with TypeScript ESM modules
-- **Imports**: Use relative imports for local modules, named imports preferred
-- **Types**: Zod schemas for validation, TypeScript interfaces for structure
-- **Naming**: camelCase for variables/functions, PascalCase for classes/namespaces
-- **Error handling**: Use Result patterns, avoid throwing exceptions in tools
-- **File structure**: Namespace-based organization (e.g., `Tool.define()`, `Session.create()`)
+# Test all
+bun test
 
-## Architecture
+# Test single file
+bun test test/tool/grep.test.ts
 
-- **Tools**: Implement `Tool.Info` interface with `execute()` method
-- **Context**: Pass `sessionID` in tool context, use `App.provide()` for DI
-- **Validation**: All inputs validated with Zod schemas
-- **Logging**: Use `Log.create({ service: "name" })` pattern
-- **Storage**: Use `Storage` namespace for persistence
-- **API Client**: The TypeScript TUI (built with SolidJS + OpenTUI) communicates with the OpenCode server using `@opencode-ai/sdk`. When adding/modifying server endpoints in `packages/opencode/src/server/server.ts`, run `./script/generate.ts` to regenerate the SDK and related files.
+# Test with pattern
+bun test --grep "basic search"
+
+# Build
+bun run build
+
+# Regenerate SDK after server changes
+./script/generate.ts
+```
+
+## Testing Patterns
+
+### Test Context Setup
+
+```typescript
+import { describe, expect, test } from "bun:test"
+import { Instance } from "../../src/project/instance"
+import { tmpdir } from "../fixture/fixture"
+
+const ctx = {
+  sessionID: "test",
+  messageID: "",
+  callID: "",
+  agent: "build",
+  abort: AbortSignal.any([]),
+  messages: [],
+  metadata: () => {},
+  ask: async () => {},
+}
+```
+
+### Using Instance.provide()
+
+```typescript
+test("my test", async () => {
+  await Instance.provide({
+    directory: projectRoot,
+    fn: async () => {
+      // Test code runs with Instance context
+      const tool = await MyTool.init()
+      const result = await tool.execute(params, ctx)
+      expect(result.output).toContain("expected")
+    },
+  })
+})
+```
+
+### Using tmpdir() for File Tests
+
+```typescript
+test("file operation", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(path.join(dir, "test.txt"), "content")
+    },
+  })
+  // tmp.path contains the temporary directory
+  // Automatically cleaned up after test
+})
+```
+
+## Tool Implementation
+
+### Define a New Tool
+
+```typescript
+import z from "zod"
+import { Tool } from "./tool"
+import DESCRIPTION from "./my-tool.txt"  // Tool description in separate file
+
+export const MyTool = Tool.define("my-tool", {
+  description: DESCRIPTION,
+  parameters: z.object({
+    input: z.string().describe("Description for the AI"),
+    optional: z.string().optional().describe("Optional parameter"),
+  }),
+  async execute(params, ctx) {
+    // Request permission if needed
+    await ctx.ask({
+      permission: "my-tool",
+      patterns: [params.input],
+      always: ["*"],
+      metadata: { input: params.input },
+    })
+
+    // Implementation
+    const result = await doSomething(params.input)
+
+    return {
+      title: params.input,
+      output: `Result: ${result}`,
+      metadata: { processed: true },
+    }
+  },
+})
+```
+
+## Path Aliases
+
+```typescript
+// @/* maps to ./src/*
+import { Tool } from "@/tool/tool"
+
+// @tui/* maps to ./src/cli/cmd/tui/*
+import { Component } from "@tui/component"
+```
+
+## Server Endpoints
+
+When adding/modifying endpoints in `src/server/server.ts`:
+
+1. Make your changes to the server
+2. Run `./script/generate.ts` to regenerate SDK
+3. Update any TUI code using the SDK
+
+## Key Modules
+
+| Module | Purpose |
+|--------|---------|
+| `src/tool/` | Tool definitions (grep, read, write, bash, etc.) |
+| `src/session/` | Session and message management |
+| `src/provider/` | AI provider integrations (OpenAI, Anthropic, etc.) |
+| `src/server/` | HTTP API server (Hono) |
+| `src/cli/` | CLI commands and TUI |
+| `src/mcp/` | MCP server integration |
+| `src/project/` | Project/instance management |
+| `src/config/` | Configuration handling |
+
+## Common Patterns
+
+### Compat Layer (for Node.js support)
+
+```typescript
+import { spawn, file } from "../compat"  // Use instead of Bun.spawn, Bun.file
+```
+
+### Logging
+
+```typescript
+import { Log } from "../util/log"
+const log = Log.create({ service: "my-service" })
+log.info("message", { key: "value" })
+```
+
+### File Operations
+
+```typescript
+import { file } from "../compat"
+
+const f = file(path)
+const content = await f.text()
+const stats = await f.stat()
+```
