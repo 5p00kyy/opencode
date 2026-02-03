@@ -258,7 +258,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     >
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <Show when={!single()}>
-          <box flexDirection="row" gap={1} paddingLeft={1}>
+          <box flexDirection="row" gap={2} paddingLeft={2}>
             <For each={questions()}>
               {(q, index) => {
                 const isActive = () => index() === store.tab
@@ -267,10 +267,13 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                 }
                 return (
                   <box
-                    paddingLeft={1}
-                    paddingRight={1}
+                    paddingLeft={2}
+                    paddingRight={2}
+                    paddingTop={1}
+                    paddingBottom={1}
                     backgroundColor={isActive() ? theme.accent : theme.backgroundElement}
                     onMouseUp={() => selectTab(index())}
+                    onMouseDown={() => selectTab(index())}
                   >
                     <text
                       fg={
@@ -288,10 +291,13 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               }}
             </For>
             <box
-              paddingLeft={1}
-              paddingRight={1}
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={1}
+              paddingBottom={1}
               backgroundColor={confirm() ? theme.accent : theme.backgroundElement}
               onMouseUp={() => selectTab(questions().length)}
+              onMouseDown={() => selectTab(questions().length)}
             >
               <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>Confirm</text>
             </box>
@@ -313,6 +319,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   const picked = () => store.answers[store.tab]?.includes(opt.label) ?? false
                   return (
                     <box
+                      paddingTop={1}
+                      paddingBottom={1}
                       onMouseOver={() => moveTo(i())}
                       onMouseDown={() => moveTo(i())}
                       onMouseUp={() => selectOption()}
@@ -342,6 +350,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               </For>
               <Show when={custom()}>
                 <box
+                  paddingTop={1}
+                  paddingBottom={1}
                   onMouseOver={() => moveTo(options().length)}
                   onMouseDown={() => moveTo(options().length)}
                   onMouseUp={() => selectOption()}

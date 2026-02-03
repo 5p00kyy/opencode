@@ -6,7 +6,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "bun run script/typecheck.ts",
     "test": "bun test",
     "test:node": "vitest run",
     "build": "bun run script/build.ts",
