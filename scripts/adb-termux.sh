@@ -4,7 +4,14 @@
 # Usage: ./scripts/adb-termux.sh --termux "command in termux (no proot)"
 # Usage: ./scripts/adb-termux.sh --proot "command inside proot"
 
-SERIAL="${ADB_SERIAL:-3A141FDJH001MJ}"
+SERIAL="${ADB_SERIAL:-$(adb devices | grep -v '^List' | grep 'device$' | head -1 | awk '{print $1}')}"
+
+if [ -z "$SERIAL" ]; then
+  echo "Error: No Android device connected"
+  echo "Connect your device via USB with USB debugging enabled"
+  echo "Or set ADB_SERIAL environment variable"
+  exit 1
+fi
 PREFIX="/data/data/com.termux/files/usr"
 HOME_DIR="/data/data/com.termux/files/home"
 DISTRO="archlinux"
