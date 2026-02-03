@@ -333,7 +333,8 @@ if [ -f "package.json" ]; then
     "$BUN_BIN" -e '
         const pkg = await Bun.file("package.json").json();
         pkg.dependencies = pkg.dependencies || {};
-        // @babel/core transitive deps that bun fails to hoist in monorepos
+        // Transitive deps that bun --backend=copyfile fails to hoist/link in monorepos
+        // @babel/core chain
         pkg.dependencies["debug"] = "4.4.0";
         pkg.dependencies["convert-source-map"] = "2.0.0";
         pkg.dependencies["gensync"] = "1.0.0-beta.2";
@@ -341,6 +342,11 @@ if [ -f "package.json" ]; then
         pkg.dependencies["semver"] = "6.3.1";
         pkg.dependencies["globals"] = "11.12.0";
         pkg.dependencies["jsesc"] = "3.0.2";
+        // gray-matter -> section-matter -> extend-shallow -> is-extendable chain
+        pkg.dependencies["extend-shallow"] = "2.0.1";
+        pkg.dependencies["is-extendable"] = "0.1.1";
+        // condense-newlines also needs these
+        pkg.dependencies["kind-of"] = "6.0.3";
         await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
         console.log("  Patched package.json with missing deps");
     ' 2>&1
@@ -357,6 +363,46 @@ info "Running bun install (using copyfile backend for Android compatibility)..."
 if [ $? -ne 0 ]; then
     warn "bun install had issues, trying again..."
     "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
+fi
+
+# ------------------------------------------------------------------
+# Fix broken internal symlinks in node_modules/.bun/
+# Bun's --backend=copyfile creates broken cross-references between
+# packages in the .bun cache directory. Each package in .bun/ has a
+# node_modules/ dir with symlinks to its deps, but these often break.
+# Pattern: .bun/<pkg>@<ver>/node_modules/<dep> -> ../../<dep>@<ver>/node_modules/<dep>
+# ------------------------------------------------------------------
+info "Scanning for broken internal symlinks in node_modules/.bun/..."
+cd "$INSTALL_DIR"
+FIXED_COUNT=0
+BROKEN_UNFIXED=0
+
+# Find all broken symlinks in the .bun directory
+while IFS= read -r broken_link; do
+    [ -z "$broken_link" ] && continue
+    dep_name=$(basename "$broken_link")
+
+    # Find the matching package directory in .bun/
+    target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+
+    if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+        rm -f "$broken_link"
+        ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+        FIXED_COUNT=$((FIXED_COUNT + 1))
+    else
+        warn "  Cannot repair: $broken_link (no matching package found)"
+        BROKEN_UNFIXED=$((BROKEN_UNFIXED + 1))
+    fi
+done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+
+if [ "$FIXED_COUNT" -gt 0 ]; then
+    success "Repaired $FIXED_COUNT broken symlinks"
+fi
+if [ "$BROKEN_UNFIXED" -gt 0 ]; then
+    warn "$BROKEN_UNFIXED broken symlinks could not be repaired"
+fi
+if [ "$FIXED_COUNT" -eq 0 ] && [ "$BROKEN_UNFIXED" -eq 0 ]; then
+    success "No broken symlinks found"
 fi
 
 # ------------------------------------------------------------------
@@ -408,6 +454,9 @@ cd "$INSTALL_DIR/packages/opencode"
     const checks = [
         ["debug", () => require("debug")],
         ["@babel/core", () => require("@babel/core")],
+        ["extend-shallow", () => require("extend-shallow")],
+        ["is-extendable", () => require("is-extendable")],
+        ["gray-matter", () => require("gray-matter")],
     ];
     let ok = true;
     for (const [name, fn] of checks) {
@@ -419,11 +468,78 @@ cd "$INSTALL_DIR/packages/opencode"
 
 if [ $? -ne 0 ]; then
     warn "Some dependencies failed to resolve. Attempting fix..."
-    "$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 @babel/core@latest $BUN_FLAGS 2>&1 | tail -5
+    "$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 extend-shallow@2.0.1 is-extendable@0.1.1 @babel/core@latest $BUN_FLAGS 2>&1 | tail -5
+fi
+
+# ------------------------------------------------------------------
+# Post-install verification: try running opencode --help
+# If it crashes with ENOENT (broken internal link), repair and retry
+# ------------------------------------------------------------------
+info "Running post-install verification (opencode --help)..."
+cd "$INSTALL_DIR/packages/opencode"
+MAX_RETRIES=3
+VERIFIED=false
+
+for attempt in $(seq 1 $MAX_RETRIES); do
+    VERIFY_OUTPUT=$("$BUN_BIN" run --conditions=browser ./src/index.ts --help 2>&1)
+    VERIFY_EXIT=$?
+
+    if [ $VERIFY_EXIT -eq 0 ]; then
+        success "OpenCode verification passed on attempt $attempt"
+        VERIFIED=true
+        break
+    fi
+
+    # Check if it's an ENOENT error pointing to a broken .bun/ link
+    if echo "$VERIFY_OUTPUT" | grep -q "ENOENT reading"; then
+        warn "Attempt $attempt/$MAX_RETRIES: ENOENT detected, repairing broken symlinks..."
+
+        # Show which package is broken
+        echo "$VERIFY_OUTPUT" | grep "ENOENT" | head -3
+
+        # Re-run the symlink repair
+        cd "$INSTALL_DIR"
+        REPAIR_COUNT=0
+        while IFS= read -r broken_link; do
+            [ -z "$broken_link" ] && continue
+            dep_name=$(basename "$broken_link")
+            target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+            if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+                rm -f "$broken_link"
+                ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+                REPAIR_COUNT=$((REPAIR_COUNT + 1))
+            fi
+        done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+
+        if [ "$REPAIR_COUNT" -gt 0 ]; then
+            info "  Repaired $REPAIR_COUNT additional broken symlinks"
+        else
+            # Symlink repair didn't find anything - try a different approach:
+            # Extract the missing package name from the error and explicitly install it
+            MISSING_PATH=$(echo "$VERIFY_OUTPUT" | grep -oP 'ENOENT reading "\K[^"]+' | head -1)
+            if [ -n "$MISSING_PATH" ]; then
+                MISSING_PKG=$(echo "$MISSING_PATH" | grep -oP 'node_modules/\K[^/]+$' | head -1)
+                if [ -n "$MISSING_PKG" ]; then
+                    warn "  Attempting explicit install of: $MISSING_PKG"
+                    "$BUN_BIN" add "$MISSING_PKG" $BUN_FLAGS 2>&1 | tail -3
+                fi
+            fi
+        fi
+        cd "$INSTALL_DIR/packages/opencode"
+    else
+        warn "Verification failed (non-ENOENT error):"
+        echo "$VERIFY_OUTPUT" | tail -5
+        break
+    fi
+done
+
+if [ "$VERIFIED" = true ]; then
+    success "Dependencies installed and verified"
+else
+    warn "Verification did not pass after $MAX_RETRIES attempts (TUI may still work)"
 fi
 
 cd "$INSTALL_DIR"
-success "Dependencies installed"
 
 # ============================================================
 # STEP E: Configure shell
@@ -635,32 +751,37 @@ case "$1" in
             echo ""
 
             echo "4. FFI dlopen test:"
+            cd ~/opencode
+            if [ -n "$SO" ]; then
+                # Use the .so path we already found (avoids module resolution issues in eval)
+                SO_ABS="$(pwd)/$SO"
+                $BUN -e "
+                    try {
+                        const libPath = \"$SO_ABS\";
+                        console.log(\"   Library path:\", libPath);
+
+                        // Step 1: dlopen the native library directly
+                        const { dlopen } = await import(\"bun:ffi\");
+                        const lib = dlopen(libPath, {
+                            createRenderer: { args: [\"u32\", \"u32\", \"bool\"], returns: \"ptr\" },
+                            destroyRenderer: { args: [\"ptr\"], returns: \"void\" },
+                        });
+                        console.log(\"   [OK] dlopen succeeded\");
+
+                        // Step 2: create renderer
+                        const ptr = lib.symbols.createRenderer(80, 24, false);
+                        console.log(\"   [OK] createRenderer returned ptr:\", ptr);
+                        if (ptr) lib.symbols.destroyRenderer(ptr);
+                        console.log(\"   [OK] FFI fully working!\");
+                    } catch (e) {
+                        console.log(\"   [FAIL]\", e.message);
+                        if (e.stack) console.log(e.stack.split(\"\\n\").slice(0,3).join(\"\\n\"));
+                    }
+                " 2>&1
+            else
+                echo "   [SKIP] libopentui.so not found, cannot test FFI"
+            fi
             cd packages/opencode
-            $BUN -e "
-                try {
-                    // Step 1: resolve native lib path
-                    const m = await import(\`@opentui/core-\${process.platform}-\${process.arch}/index.ts\`);
-                    const libPath = m.default;
-                    console.log(\"   [OK] Native module path:\", libPath);
-
-                    // Step 2: dlopen
-                    const { dlopen } = await import(\"bun:ffi\");
-                    const lib = dlopen(libPath, {
-                        createRenderer: { args: [\"u32\", \"u32\", \"bool\"], returns: \"ptr\" },
-                        destroyRenderer: { args: [\"ptr\"], returns: \"void\" },
-                    });
-                    console.log(\"   [OK] dlopen succeeded\");
-
-                    // Step 3: create renderer
-                    const ptr = lib.symbols.createRenderer(80, 24, false);
-                    console.log(\"   [OK] createRenderer returned ptr:\", ptr);
-                    if (ptr) lib.symbols.destroyRenderer(ptr);
-                    console.log(\"   [OK] FFI fully working!\");
-                } catch (e) {
-                    console.log(\"   [FAIL]\", e.message);
-                    if (e.stack) console.log(e.stack.split(\"\\n\").slice(0,3).join(\"\\n\"));
-                }
-            " 2>&1
             echo ""
 
             echo "5. Full import test:"
@@ -674,28 +795,87 @@ case "$1" in
             " 2>&1
             echo ""
 
-            echo "6. Terminal info:"
+            echo "6. Broken symlinks in .bun/:"
+            cd ~/opencode
+            BROKEN=$(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null | head -20)
+            if [ -n "$BROKEN" ]; then
+                BROKEN_COUNT=$(echo "$BROKEN" | wc -l)
+                echo "   [WARN] $BROKEN_COUNT broken symlinks found:"
+                echo "$BROKEN" | head -10 | sed "s/^/   /"
+                if [ "$BROKEN_COUNT" -gt 10 ]; then
+                    echo "   ... and $((BROKEN_COUNT - 10)) more"
+                fi
+                echo "   Run: opencode-proot fix-links"
+            else
+                echo "   [OK] No broken symlinks"
+            fi
+            echo ""
+
+            echo "7. Terminal info:"
             echo "   TERM=$TERM"
             echo "   COLORTERM=$COLORTERM"
             echo "   tty: $(tty 2>/dev/null || echo none)"
             echo "   stty size: $(stty size 2>/dev/null || echo unknown)"
             echo ""
 
-            echo "7. OpenCode --help:"
+            echo "8. OpenCode --help:"
+            cd packages/opencode
             $BUN run --conditions=browser ./src/index.ts --help 2>&1 | head -10
             echo ""
             echo "=== Done ==="
         '
         ;;
+    fix-links)
+        echo "Repairing broken symlinks in node_modules/.bun/..."
+        exec proot-distro login "$DISTRO" -- bash -c '
+            cd ~/opencode
+            FIXED=0
+            while IFS= read -r broken_link; do
+                [ -z "$broken_link" ] && continue
+                dep_name=$(basename "$broken_link")
+                target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+                if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+                    rm -f "$broken_link"
+                    ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+                    FIXED=$((FIXED + 1))
+                    echo "  Fixed: $broken_link -> $target_dir/node_modules/$dep_name"
+                else
+                    echo "  Cannot fix: $broken_link (no matching package)"
+                fi
+            done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+            echo ""
+            if [ "$FIXED" -gt 0 ]; then
+                echo "Repaired $FIXED broken symlinks"
+            else
+                echo "No broken symlinks found"
+            fi
+        '
+        ;;
     reinstall)
-        echo "Reinstalling dependencies (clean)..."
-        exec proot-distro login "$DISTRO" -- bash -c "
-            $OPENTUI_ENV
+        echo "Reinstalling dependencies (clean + symlink repair)..."
+        exec proot-distro login "$DISTRO" -- bash -c '
+            export BUN_INSTALL="$HOME/.bun"
+            export PATH="$BUN_INSTALL/bin:$PATH"
             cd ~/opencode
             rm -rf node_modules packages/opencode/node_modules
             rm -rf ~/.bun/install/cache
             ~/.bun/bin/bun install --backend=copyfile
-        "
+
+            # Repair broken symlinks
+            echo "Repairing broken symlinks..."
+            FIXED=0
+            while IFS= read -r broken_link; do
+                [ -z "$broken_link" ] && continue
+                dep_name=$(basename "$broken_link")
+                target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+                if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+                    rm -f "$broken_link"
+                    ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+                    FIXED=$((FIXED + 1))
+                fi
+            done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+            echo "Repaired $FIXED broken symlinks"
+        '
         ;;
     *)
         # Default: Run TUI with script PTY wrapper for proper terminal I/O
