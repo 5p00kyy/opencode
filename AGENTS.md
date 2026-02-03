@@ -3,181 +3,128 @@
 ## Repository Info
 
 - **Default branch**: `dev` (upstream), `termux-arm64` (this fork)
-- **Runtime**: Bun 1.3.5 with TypeScript ESM modules
-- **Monorepo**: Uses Bun workspaces with packages in `packages/*`
-- **Main package**: `packages/opencode` (CLI and server)
-- **Termux Port**: See [[TERMUX-ROADMAP.md]] for ARM64 Android development plan
-
-## Termux ARM64 Port Status
-
-This fork adds Termux/Android ARM64 support. Current status:
-- ✅ Node.js compat layer (headless `opencode serve` works)
-- 🔄 PRoot solution (full Bun via proot-distro)
-- ❌ Native Bun (long-term goal)
-
-For Termux development, see `TERMUX-ROADMAP.md` for the full plan.
+- **Runtime**: Bun 1.3.5, TypeScript ESM (`"type": "module"`)
+- **Monorepo**: Bun workspaces — `packages/*`, `packages/console/*`, `packages/sdk/js`, `packages/slack`
+- **Main package**: `packages/opencode` (CLI, server, TUI)
+- **Typechecker**: `tsgo` (native TypeScript), invoked via `turbo`
+- **Formatter**: Prettier — `semi: false`, `printWidth: 120`
+- **No linter** configured (no ESLint/Biome)
 
 ## Build/Run Commands
 
 ```bash
-# Install dependencies
-bun install
+bun install                                                        # Install all workspace deps
+bun run dev                                                        # Run OpenCode TUI (from repo root)
+bun run --cwd packages/opencode --conditions=browser ./src/index.ts  # Run directly (--conditions=browser required)
+bun run typecheck                                                  # Typecheck all packages (turbo + tsgo)
+bun run --cwd packages/opencode typecheck                          # Typecheck single package
+bun run --cwd packages/opencode build                              # Build opencode package
+```
 
-# Run OpenCode (development)
-bun run dev                                    # From repo root
-bun run --conditions=browser ./src/index.ts    # From packages/opencode
+**SDK regeneration** (after modifying `packages/opencode/src/server/server.ts`):
 
-# Typecheck
-bun run typecheck                              # Uses turbo, runs across all packages
-bun run --cwd packages/opencode typecheck      # Single package (uses tsgo)
-
-# Build
-bun run --cwd packages/opencode build          # Build opencode package
+```bash
+./packages/sdk/js/script/build.ts    # From repo root
+./script/generate.ts                 # From packages/opencode
 ```
 
 ## Testing
 
+Tests run with `bun test` from `packages/opencode/`. Do NOT run tests from root.
+
 ```bash
-# Run all tests (from packages/opencode)
-bun test
-
-# Run single test file
-bun test test/tool/grep.test.ts
-
-# Run tests matching pattern
-bun test --grep "basic search"
-
-# Run with coverage
-bun test --coverage
+bun test                              # All tests
+bun test test/tool/grep.test.ts       # Single test file
+bun test --grep "basic search"        # Tests matching pattern
+bun test --coverage                   # With coverage
+bun test --timeout 15000              # Override default 10s timeout
 ```
 
-**Testing rules:**
-- NEVER use mocks - test actual implementation
+- **Timeout**: 10 seconds (configured in `packages/opencode/bunfig.toml`)
+- **Preload**: `test/preload.ts` runs before all tests
+- **NEVER mock** — test actual implementations
 - Do not duplicate logic into tests
-- Use `Instance.provide()` for test context
-- Use `tmpdir()` fixture for filesystem tests
-
-## SDK Regeneration
-
-When modifying server endpoints in `packages/opencode/src/server/server.ts`:
-```bash
-./packages/sdk/js/script/build.ts
-# Or from packages/opencode:
-./script/generate.ts
-```
+- Use `Instance.provide()` for test context, `tmpdir()` for filesystem tests
 
 ## Code Style
 
-### General Principles
+### Formatting
 
-- Prefer automation: execute actions without confirmation unless blocked
-- ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE
-- Keep functions focused unless composable/reusable
-- Rely on type inference; avoid explicit annotations unless necessary for exports
-- Avoid `any` type
+- **No semicolons** — enforced by Prettier (`semi: false`)
+- **120 char line width** — `printWidth: 120`
+- No explicit Prettier runs needed; follow the convention manually
 
 ### Imports
 
-- Use relative imports for local modules
-- Named imports preferred over default
+- Relative imports for local modules — `import { Tool } from "./tool"`
+- Named imports preferred over default — `import { Foo }` not `import Foo`
 - Path aliases: `@/*` → `./src/*`, `@tui/*` → `./src/cli/cmd/tui/*`
 
-```typescript
-// Good
-import { Tool } from "./tool"
-import { Instance } from "../project/instance"
+### Naming
 
-// Bad
-import Tool from "./tool"
-```
-
-### Variables and Naming
-
-- Prefer `const` over `let`
-- Use single-word names when possible
+- `const` over `let`; single-word names when possible
 - camelCase for variables/functions, PascalCase for classes/namespaces
-
-```typescript
-// Good
-const foo = condition ? 1 : 2
-const result = await fetch()
-
-// Bad
-let foo
-if (condition) foo = 1
-else foo = 2
-
-const fooBarBaz = 1  // Avoid multi-word when single word works
-```
+- Namespace-based organization: `Tool.define()`, `Session.create()`
 
 ### Control Flow
 
-- Avoid `else` statements - use early returns
-- Use ternary for simple conditionals
-- Use IIFE for complex conditional assignments
+- **No `else`** — use early returns
+- Ternary for simple conditionals
+- IIFE for complex conditional assignments
 
 ```typescript
-// Good
-function process(x: number) {
-  if (x < 0) return null
-  return x * 2
-}
-
-// Bad
-function process(x: number) {
-  if (x < 0) return null
-  else return x * 2
-}
+// Good                          // Bad
+function process(x: number) {   function process(x: number) {
+  if (x < 0) return null          if (x < 0) return null
+  return x * 2                     else return x * 2
+}                                }
 ```
 
 ### Destructuring
 
-- Avoid unnecessary destructuring - preserve context
+Avoid unnecessary destructuring — preserve context:
 
 ```typescript
-// Good
-console.log(user.name, user.email)
-
-// Bad (loses context)
-const { name, email } = user
-console.log(name, email)
+console.log(user.name, user.email) // Good: context preserved
+const { name, email } = user // Bad: loses context
 ```
 
 ### Error Handling
 
-- Use Result patterns, avoid throwing in tools
-- Avoid try/catch where possible
-- Tools should return structured results, not throw
+- Result patterns over throwing — tools return structured results, not exceptions
+- Avoid `try/catch` where possible
+- Tools should never throw; return `{ output, metadata }`
 
-### Types and Validation
+### Types
 
-- Zod schemas for runtime validation
-- TypeScript interfaces for structure
-- Namespace-based organization: `Tool.define()`, `Session.create()`
+- Rely on type inference; explicit annotations only for exports
+- Avoid `any`
+- Zod schemas for runtime validation, TypeScript interfaces for structure
+
+## Architecture Patterns
+
+### Tool Definition
 
 ```typescript
-// Tool definition pattern
 export const MyTool = Tool.define("my-tool", {
-  description: DESCRIPTION,
-  parameters: z.object({
-    input: z.string().describe("The input value"),
-  }),
+  description: DESCRIPTION, // Imported from .txt file
+  parameters: z.object({ input: z.string().describe("The input") }),
   async execute(params, ctx) {
-    // Implementation
-    return { output: "result", metadata: {} }
+    await ctx.ask({ permission: "my-tool", patterns: [params.input], always: ["*"] })
+    return { title: params.input, output: "result", metadata: {} }
   },
 })
 ```
 
-## Architecture Patterns
-
 ### Dependency Injection
+
 ```typescript
 import { App } from "../app"
 const service = App.provide(MyService)
 ```
 
 ### Logging
+
 ```typescript
 import { Log } from "../util/log"
 const log = Log.create({ service: "my-service" })
@@ -185,66 +132,61 @@ log.info("message", { data })
 ```
 
 ### Context
+
 - Pass `sessionID` in tool context
-- Use `ctx.ask()` for permissions
-- Use `ctx.abort` for cancellation
+- `ctx.ask()` for permissions, `ctx.abort` for cancellation
 
-### Bun APIs
-Prefer Bun APIs when available:
+### Bun APIs Preferred
+
 ```typescript
-// Good
-await Bun.write(path, content)
-const content = await Bun.file(path).text()
-
-// Instead of
-fs.writeFileSync(path, content)
+await Bun.write(path, content) // Not fs.writeFileSync
+const text = await Bun.file(path).text() // Not fs.readFileSync
 ```
 
-### Termux/Node.js Compatibility
-For code that must work on both Bun and Node.js (Termux support):
+### Termux/Node.js Compat Layer
+
+For code that must work on both Bun and Node.js:
+
 ```typescript
-// Use compat layer instead of direct Bun APIs
-import { spawn, file } from "../compat"
-
-const f = file(path)          // Works on both Bun and Node.js
-const proc = spawn(["cmd"])   // Works on both runtimes
+import { spawn, file } from "../compat" // Works on both runtimes
 ```
-
-## Local Development
-
-### Backend + App (separate servers)
-```bash
-# Terminal 1: Backend (from packages/opencode)
-bun run --conditions=browser ./src/index.ts serve --port 4096
-
-# Terminal 2: App (from packages/app)
-bun dev -- --port 4444
-
-# Open http://localhost:4444
-```
-
-### SolidJS (packages/app)
-- Prefer `createStore` over multiple `createSignal` calls
-- `opencode dev web` proxies production - use separate servers for local UI changes
-
-## Debugging
-
-- NEVER restart the app or server process during debugging
-- Use `agent-browser` for web automation testing
 
 ## File Structure
 
 ```
 packages/
-├── opencode/          # Main CLI and server
+├── opencode/            # Main CLI and server
 │   ├── src/
-│   │   ├── tool/      # Tool implementations
-│   │   ├── session/   # Session management
-│   │   ├── server/    # HTTP server (Hono)
-│   │   ├── provider/  # AI provider integrations
-│   │   └── cli/       # CLI commands
-│   └── test/          # Tests mirror src/ structure
-├── app/               # Web UI (SolidJS)
-├── sdk/js/            # TypeScript SDK
-└── ui/                # Shared UI components
+│   │   ├── tool/        # Tool implementations (grep, read, write, bash)
+│   │   ├── session/     # Session management
+│   │   ├── server/      # HTTP API server (Hono)
+│   │   ├── provider/    # AI provider integrations
+│   │   ├── cli/         # CLI commands and TUI
+│   │   ├── mcp/         # MCP server integration
+│   │   ├── project/     # Project/instance management
+│   │   └── config/      # Configuration handling
+│   └── test/            # Tests mirror src/ structure
+├── app/                 # Web UI (SolidJS + Vite)
+├── sdk/js/              # TypeScript SDK (auto-generated)
+└── ui/                  # Shared UI components
 ```
+
+## Local Development
+
+```bash
+# Terminal 1: Backend (from packages/opencode)
+bun run --conditions=browser ./src/index.ts serve --port 4096
+
+# Terminal 2: Web app (from packages/app)
+bun dev -- --port 4444
+# Open http://localhost:4444
+```
+
+- SolidJS: prefer `createStore` over multiple `createSignal` calls
+- `opencode dev web` proxies production — use separate servers for local UI changes
+
+## Debugging
+
+- NEVER restart the app or server process during debugging
+- Use `agent-browser` for web automation testing
+- Termux ARM64 port details: see `TERMUX-ROADMAP.md`
