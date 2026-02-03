@@ -357,12 +357,19 @@ cd "$INSTALL_DIR"
 # Run bun install - this resolves everything from the lockfile +
 # our patched deps
 # ------------------------------------------------------------------
-info "Running bun install (using copyfile backend for Android compatibility)..."
-"$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
+# First pass: --ignore-scripts to ensure ALL packages are fully extracted
+# without postinstall scripts (like tree-sitter-bash node-gyp) aborting mid-install
+info "Running bun install pass 1/2 (package extraction, skip scripts)..."
+"$BUN_BIN" install $BUN_FLAGS --ignore-scripts 2>&1 | tail -10
+
+# Second pass: normal install to run any needed postinstall scripts
+# This also fixes any incomplete extractions from pass 1
+info "Running bun install pass 2/2 (with scripts)..."
+"$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -10
 
 if [ $? -ne 0 ]; then
-    warn "bun install had issues, trying again..."
-    "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
+    warn "bun install had issues on pass 2, trying once more..."
+    "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -10
 fi
 
 # ------------------------------------------------------------------
@@ -473,11 +480,11 @@ fi
 
 # ------------------------------------------------------------------
 # Post-install verification: try running opencode --help
-# If it crashes with ENOENT (broken internal link), repair and retry
+# If it crashes with ENOENT or "Cannot find module", repair and retry
 # ------------------------------------------------------------------
 info "Running post-install verification (opencode --help)..."
 cd "$INSTALL_DIR/packages/opencode"
-MAX_RETRIES=3
+MAX_RETRIES=5
 VERIFIED=false
 
 for attempt in $(seq 1 $MAX_RETRIES); do
@@ -490,14 +497,12 @@ for attempt in $(seq 1 $MAX_RETRIES); do
         break
     fi
 
-    # Check if it's an ENOENT error pointing to a broken .bun/ link
+    warn "Attempt $attempt/$MAX_RETRIES failed:"
+    echo "$VERIFY_OUTPUT" | grep -E "(ENOENT|Cannot find module|error:)" | head -3
+
+    # Strategy 1: ENOENT = broken symlink in .bun/
     if echo "$VERIFY_OUTPUT" | grep -q "ENOENT reading"; then
-        warn "Attempt $attempt/$MAX_RETRIES: ENOENT detected, repairing broken symlinks..."
-
-        # Show which package is broken
-        echo "$VERIFY_OUTPUT" | grep "ENOENT" | head -3
-
-        # Re-run the symlink repair
+        info "  Repairing broken symlinks..."
         cd "$INSTALL_DIR"
         REPAIR_COUNT=0
         while IFS= read -r broken_link; do
@@ -510,33 +515,80 @@ for attempt in $(seq 1 $MAX_RETRIES); do
                 REPAIR_COUNT=$((REPAIR_COUNT + 1))
             fi
         done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+        [ "$REPAIR_COUNT" -gt 0 ] && info "  Repaired $REPAIR_COUNT broken symlinks"
 
-        if [ "$REPAIR_COUNT" -gt 0 ]; then
-            info "  Repaired $REPAIR_COUNT additional broken symlinks"
-        else
-            # Symlink repair didn't find anything - try a different approach:
-            # Extract the missing package name from the error and explicitly install it
-            MISSING_PATH=$(echo "$VERIFY_OUTPUT" | grep -oP 'ENOENT reading "\K[^"]+' | head -1)
-            if [ -n "$MISSING_PATH" ]; then
-                MISSING_PKG=$(echo "$MISSING_PATH" | grep -oP 'node_modules/\K[^/]+$' | head -1)
-                if [ -n "$MISSING_PKG" ]; then
-                    warn "  Attempting explicit install of: $MISSING_PKG"
-                    "$BUN_BIN" add "$MISSING_PKG" $BUN_FLAGS 2>&1 | tail -3
-                fi
+        # Also try explicit install of the missing package
+        MISSING_PATH=$(echo "$VERIFY_OUTPUT" | grep -oP 'ENOENT reading "\K[^"]+' | head -1)
+        if [ -n "$MISSING_PATH" ]; then
+            MISSING_PKG=$(echo "$MISSING_PATH" | grep -oP 'node_modules/\.bun/\K[^@]+' | head -1)
+            if [ -n "$MISSING_PKG" ]; then
+                warn "  Re-adding package: $MISSING_PKG"
+                cd "$INSTALL_DIR/packages/opencode"
+                "$BUN_BIN" add "$MISSING_PKG" $BUN_FLAGS --ignore-scripts 2>&1 | tail -3
             fi
         fi
         cd "$INSTALL_DIR/packages/opencode"
+
+    # Strategy 2: Cannot find module = incomplete package extraction
+    # --backend=copyfile can leave packages with missing internal files
+    elif echo "$VERIFY_OUTPUT" | grep -q "Cannot find module"; then
+        # Extract the parent package name from the error
+        # Pattern: Cannot find module '...' from '<path>/node_modules/.bun/<pkg>@<ver>.../node_modules/<pkg>/...'
+        BROKEN_PKG_PATH=$(echo "$VERIFY_OUTPUT" | grep -oP "from '\K[^']+" | head -1)
+        if [ -n "$BROKEN_PKG_PATH" ]; then
+            # Extract npm package name from the path
+            # e.g. .bun/openai@6.17.0+hash/node_modules/openai/client.mjs -> openai
+            BROKEN_PKG=$(echo "$BROKEN_PKG_PATH" | grep -oP 'node_modules/\.bun/\K[^@]+' | head -1)
+            # Also get the full version spec (e.g. openai@6.17.0)
+            BROKEN_PKG_SPEC=$(echo "$BROKEN_PKG_PATH" | grep -oP 'node_modules/\.bun/\K[^+/]+' | head -1)
+
+            if [ -n "$BROKEN_PKG" ]; then
+                info "  Package '$BROKEN_PKG' has missing internal files (incomplete extraction)"
+                info "  Removing cached package and re-installing..."
+
+                cd "$INSTALL_DIR"
+
+                # Remove the broken package from .bun cache to force re-extraction
+                BROKEN_CACHE_DIR=$(find node_modules/.bun -maxdepth 1 -type d -name "${BROKEN_PKG}@*" 2>/dev/null | head -1)
+                if [ -n "$BROKEN_CACHE_DIR" ]; then
+                    rm -rf "$BROKEN_CACHE_DIR"
+                    info "  Cleared: $BROKEN_CACHE_DIR"
+                fi
+
+                # Also clear from global bun cache
+                rm -rf "$HOME/.bun/install/cache/${BROKEN_PKG}" 2>/dev/null || true
+
+                # Re-run bun install to re-extract the package
+                "$BUN_BIN" install $BUN_FLAGS --ignore-scripts 2>&1 | tail -5
+
+                # Run symlink repair again since we deleted and re-created dirs
+                while IFS= read -r broken_link; do
+                    [ -z "$broken_link" ] && continue
+                    dep_name=$(basename "$broken_link")
+                    target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+                    if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+                        rm -f "$broken_link"
+                        ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+                    fi
+                done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+            fi
+        fi
+        cd "$INSTALL_DIR/packages/opencode"
+
+    # Strategy 3: Unknown error - try a blanket bun install
     else
-        warn "Verification failed (non-ENOENT error):"
-        echo "$VERIFY_OUTPUT" | tail -5
-        break
+        warn "  Unknown error type, re-running bun install..."
+        cd "$INSTALL_DIR"
+        "$BUN_BIN" install $BUN_FLAGS --ignore-scripts 2>&1 | tail -5
+        cd "$INSTALL_DIR/packages/opencode"
     fi
 done
 
 if [ "$VERIFIED" = true ]; then
     success "Dependencies installed and verified"
 else
-    warn "Verification did not pass after $MAX_RETRIES attempts (TUI may still work)"
+    warn "Verification did not pass after $MAX_RETRIES attempts"
+    warn "You can try: opencode-proot fix-links, then opencode-proot reinstall"
 fi
 
 cd "$INSTALL_DIR"
@@ -703,7 +755,27 @@ case "$1" in
         exec proot-distro login "$DISTRO" "$@"
         ;;
     update)
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && git pull && ~/.bun/bin/bun install --backend=copyfile"
+        exec proot-distro login "$DISTRO" -- bash -c '
+            export BUN_INSTALL="$HOME/.bun"
+            export PATH="$BUN_INSTALL/bin:$PATH"
+            cd ~/opencode && git pull
+            ~/.bun/bin/bun install --backend=copyfile --ignore-scripts
+            ~/.bun/bin/bun install --backend=copyfile
+            # Repair broken symlinks
+            FIXED=0
+            while IFS= read -r broken_link; do
+                [ -z "$broken_link" ] && continue
+                dep_name=$(basename "$broken_link")
+                target_dir=$(find node_modules/.bun -maxdepth 1 -type d -name "${dep_name}@*" 2>/dev/null | head -1)
+                if [ -n "$target_dir" ] && [ -d "$target_dir/node_modules/$dep_name" ]; then
+                    rm -f "$broken_link"
+                    ln -sf "../../$(basename "$target_dir")/node_modules/$dep_name" "$broken_link"
+                    FIXED=$((FIXED + 1))
+                fi
+            done < <(find node_modules/.bun -type l ! -exec test -e {} \; -print 2>/dev/null)
+            [ "$FIXED" -gt 0 ] && echo "Repaired $FIXED broken symlinks"
+            echo "Update complete"
+        '
         ;;
     serve)
         # Headless server - no PTY needed
