@@ -454,26 +454,23 @@ function Prompt<const T extends Record<string, string>>(props: {
       <box
         flexDirection={narrow() ? "column" : "row"}
         flexShrink={0}
-        gap={2}
-        paddingTop={2}
+        gap={1}
+        paddingTop={1}
         paddingLeft={2}
         paddingRight={3}
-        paddingBottom={2}
+        paddingBottom={1}
         backgroundColor={theme.backgroundElement}
         justifyContent={narrow() ? "flex-start" : "space-between"}
         alignItems={narrow() ? "flex-start" : "center"}
       >
-        <box flexDirection="row" gap={2} flexShrink={0} flexWrap="wrap">
+        <box flexDirection="row" gap={1} flexShrink={0}>
           <For each={keys}>
             {(option) => (
               <box
-                paddingLeft={2}
-                paddingRight={2}
-                paddingTop={1}
-                paddingBottom={1}
+                paddingLeft={1}
+                paddingRight={1}
                 backgroundColor={option === store.selected ? theme.warning : theme.backgroundMenu}
                 onMouseOver={() => setStore("selected", option)}
-                onMouseDown={() => setStore("selected", option)}
                 onMouseUp={() => {
                   setStore("selected", option)
                   props.onSelect(option)
@@ -486,7 +483,7 @@ function Prompt<const T extends Record<string, string>>(props: {
             )}
           </For>
         </box>
-        <box flexDirection="row" gap={2} flexShrink={0}>
+        <box flexDirection="row" gap={1} flexShrink={0}>
           <Show when={props.fullscreen}>
             <text fg={theme.text}>
               {"ctrl+f"} <span style={{ fg: theme.textMuted }}>{hint()}</span>
