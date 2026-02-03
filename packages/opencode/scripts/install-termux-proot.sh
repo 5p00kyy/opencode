@@ -196,6 +196,8 @@ if command -v pacman &> /dev/null; then
         fd \
         jq \
         which \
+        util-linux \
+        file \
         2>&1 | tail -10
     
     if [ $? -eq 0 ]; then
@@ -208,14 +210,14 @@ elif command -v apt-get &> /dev/null; then
     # Debian/Ubuntu
     info "Detected Debian/Ubuntu, using apt..."
     apt-get update -qq
-    apt-get install -y curl git unzip build-essential ca-certificates ripgrep fd-find jq 2>&1 | tail -5
+    apt-get install -y curl git unzip build-essential ca-certificates ripgrep fd-find jq util-linux file 2>&1 | tail -5
     success "System packages installed"
     
 elif command -v apk &> /dev/null; then
     # Alpine
     info "Detected Alpine, using apk..."
     apk update
-    apk add --no-cache curl git unzip build-base ca-certificates ripgrep fd jq bash
+    apk add --no-cache curl git unzip build-base ca-certificates ripgrep fd jq bash util-linux file
     success "System packages installed"
     
 else
@@ -316,9 +318,39 @@ BUN_FLAGS="--backend=copyfile"
 # Clean slate - remove existing node_modules and bun cache
 info "Cleaning existing installations..."
 rm -rf "$INSTALL_DIR/node_modules" 2>/dev/null || true
+rm -rf "$INSTALL_DIR/packages/opencode/node_modules" 2>/dev/null || true
 rm -rf "$HOME/.bun/install/cache" 2>/dev/null || true
 
-# Run bun install with copyfile backend (use absolute path)
+# ------------------------------------------------------------------
+# Patch packages/opencode/package.json to add missing transitive deps
+# Bun's monorepo hoisting misses these - @babel/core needs debug,
+# convert-source-map, gensync but they don't get hoisted properly
+# ------------------------------------------------------------------
+info "Patching package.json to include missing transitive dependencies..."
+cd "$INSTALL_DIR/packages/opencode"
+if [ -f "package.json" ]; then
+    # Use bun to patch the JSON properly
+    "$BUN_BIN" -e '
+        const pkg = await Bun.file("package.json").json();
+        pkg.dependencies = pkg.dependencies || {};
+        // @babel/core transitive deps that bun fails to hoist in monorepos
+        pkg.dependencies["debug"] = "4.4.0";
+        pkg.dependencies["convert-source-map"] = "2.0.0";
+        pkg.dependencies["gensync"] = "1.0.0-beta.2";
+        pkg.dependencies["ms"] = "2.1.3";
+        pkg.dependencies["semver"] = "6.3.1";
+        pkg.dependencies["globals"] = "11.12.0";
+        pkg.dependencies["jsesc"] = "3.0.2";
+        await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
+        console.log("  Patched package.json with missing deps");
+    ' 2>&1
+fi
+cd "$INSTALL_DIR"
+
+# ------------------------------------------------------------------
+# Run bun install - this resolves everything from the lockfile +
+# our patched deps
+# ------------------------------------------------------------------
 info "Running bun install (using copyfile backend for Android compatibility)..."
 "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
 
@@ -327,70 +359,70 @@ if [ $? -ne 0 ]; then
     "$BUN_BIN" install $BUN_FLAGS 2>&1 | tail -15
 fi
 
-# Fix monorepo dependency issues - these packages need to be explicitly installed
-# because bun's module resolution in monorepos can miss transitive dependencies
-info "Installing commonly missing dependencies..."
-
-# Install at root level
-"$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 $BUN_FLAGS 2>&1 | tail -3
-
-# Install at packages/opencode level as well for proper resolution
-cd "$INSTALL_DIR/packages/opencode"
-"$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 @babel/core@latest $BUN_FLAGS 2>&1 | tail -3
-
-cd "$INSTALL_DIR"
-
-# Verify OpenTUI native library was installed for the correct architecture
-info "Verifying OpenTUI native library installation..."
+# ------------------------------------------------------------------
+# Verify OpenTUI native library
+# ------------------------------------------------------------------
+info "Verifying OpenTUI native library..."
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    OPENTUI_NATIVE="$INSTALL_DIR/node_modules/@opentui/core-linux-arm64"
-    OPENTUI_BUN="$INSTALL_DIR/node_modules/.bun/node_modules/@opentui/core-linux-arm64"
-    EXPECTED_ARCH="linux-arm64"
+    EXPECTED_PKG="core-linux-arm64"
 else
-    OPENTUI_NATIVE="$INSTALL_DIR/node_modules/@opentui/core-linux-x64"
-    OPENTUI_BUN="$INSTALL_DIR/node_modules/.bun/node_modules/@opentui/core-linux-x64"
-    EXPECTED_ARCH="linux-x64"
+    EXPECTED_PKG="core-linux-x64"
 fi
 
-# Check both possible locations
-if [ -d "$OPENTUI_NATIVE" ]; then
-    success "OpenTUI native library found at $OPENTUI_NATIVE"
-    ls -la "$OPENTUI_NATIVE"/*.so 2>/dev/null || true
-elif [ -d "$OPENTUI_BUN" ]; then
-    success "OpenTUI native library found at $OPENTUI_BUN"
-    ls -la "$OPENTUI_BUN"/*.so 2>/dev/null || true
-else
-    warn "OpenTUI native library for $EXPECTED_ARCH not found!"
-    warn "Attempting to install it explicitly..."
-    "$BUN_BIN" add @opentui/core-linux-arm64@0.1.75 $BUN_FLAGS 2>&1 | tail -5
-fi
-
-# Double-check the .so file exists and is valid
 SO_FILE=$(find "$INSTALL_DIR/node_modules" -name "libopentui.so" -type f 2>/dev/null | head -1)
 if [ -n "$SO_FILE" ]; then
     success "Native library found: $SO_FILE"
     file "$SO_FILE" 2>/dev/null || ls -la "$SO_FILE"
-else
-    warn "libopentui.so not found in node_modules - TUI may not work!"
-fi
 
-# Verify critical packages installed
-info "Verifying critical dependencies..."
-MISSING_DEPS=""
-for pkg in debug @babel/core; do
-    if [ ! -d "$INSTALL_DIR/node_modules/$pkg" ] && [ ! -d "$INSTALL_DIR/packages/opencode/node_modules/$pkg" ]; then
-        MISSING_DEPS="$MISSING_DEPS $pkg"
+    # Check if .so can actually be loaded (ldd check)
+    if command -v ldd &> /dev/null; then
+        info "Checking library dependencies..."
+        LDD_OUTPUT=$(ldd "$SO_FILE" 2>&1)
+        if echo "$LDD_OUTPUT" | grep -q "not found"; then
+            warn "Some shared library dependencies are missing:"
+            echo "$LDD_OUTPUT" | grep "not found"
+        else
+            success "All library dependencies satisfied"
+        fi
     fi
-done
-
-if [ -n "$MISSING_DEPS" ]; then
-    warn "Some dependencies missing:$MISSING_DEPS"
-    warn "Attempting to install them..."
-    cd "$INSTALL_DIR/packages/opencode"
-    "$BUN_BIN" add $MISSING_DEPS $BUN_FLAGS 2>&1 | tail -5
+else
+    warn "libopentui.so not found! Attempting explicit install..."
+    cd "$INSTALL_DIR"
+    "$BUN_BIN" add @opentui/$EXPECTED_PKG@0.1.75 $BUN_FLAGS 2>&1 | tail -5
+    SO_FILE=$(find "$INSTALL_DIR/node_modules" -name "libopentui.so" -type f 2>/dev/null | head -1)
+    if [ -n "$SO_FILE" ]; then
+        success "Native library installed: $SO_FILE"
+    else
+        warn "libopentui.so STILL not found - TUI may not work!"
+    fi
 fi
 
+# ------------------------------------------------------------------
+# Verify critical packages are resolvable
+# ------------------------------------------------------------------
+info "Verifying dependency resolution..."
+cd "$INSTALL_DIR/packages/opencode"
+"$BUN_BIN" -e '
+    // Test that the critical import chain works
+    const checks = [
+        ["debug", () => require("debug")],
+        ["@babel/core", () => require("@babel/core")],
+    ];
+    let ok = true;
+    for (const [name, fn] of checks) {
+        try { fn(); console.log("  [OK] " + name); }
+        catch (e) { console.log("  [FAIL] " + name + ": " + e.message); ok = false; }
+    }
+    if (!ok) process.exit(1);
+' 2>&1
+
+if [ $? -ne 0 ]; then
+    warn "Some dependencies failed to resolve. Attempting fix..."
+    "$BUN_BIN" add debug@4.4.0 convert-source-map@2.0.0 gensync@1.0.0-beta.2 @babel/core@latest $BUN_FLAGS 2>&1 | tail -5
+fi
+
+cd "$INSTALL_DIR"
 success "Dependencies installed"
 
 # ============================================================
@@ -520,51 +552,27 @@ export TERM="${TERM:-xterm-256color}"
 export COLORTERM="${COLORTERM:-truecolor}"
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
-# OpenTUI compatibility flags
 export OPENTUI_FORCE_EXPLICIT_WIDTH=false
 export OPENTUI_FORCE_WCWIDTH=true
 export OPENTUI_NO_GRAPHICS=true
-# Bun paths
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 '
 
-# Debug environment additions (verbose output)
+# Debug additions
 DEBUG_ENV='
 export OTUI_DEBUG=true
 export OTUI_SHOW_STATS=true
 export OTUI_DEBUG_FFI=true
 '
 
-# Safe mode - disable alternate screen which can cause issues in proot
+# Safe mode - no alternate screen
 SAFE_MODE_ENV='
 export OTUI_USE_ALTERNATE_SCREEN=false
 '
 
-# Minimal TUI test script
-MINIMAL_TUI_TEST='
-import { createCliRenderer } from "@opentui/core";
-console.log("Creating CLI renderer...");
-try {
-    const renderer = await createCliRenderer({
-        width: 80,
-        height: 24,
-        useAlternateScreen: false,
-        exitOnCtrlC: true,
-    });
-    console.log("Renderer created successfully!");
-    console.log("Terminal size:", renderer.width, "x", renderer.height);
-    setTimeout(() => {
-        console.log("Destroying renderer...");
-        renderer.destroy();
-        console.log("Test complete - TUI works!");
-        process.exit(0);
-    }, 2000);
-} catch (e) {
-    console.error("Failed to create renderer:", e);
-    process.exit(1);
-}
-'
+# The bun command to launch opencode TUI
+OC_CMD='cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts'
 
 # Check if proot-distro is available
 if ! command -v proot-distro &> /dev/null; then
@@ -575,117 +583,127 @@ fi
 # Handle special commands
 case "$1" in
     shell)
-        # Enter interactive shell in proot
         shift
         exec proot-distro login "$DISTRO" "$@"
         ;;
     update)
-        # Update OpenCode in proot
         exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && git pull && ~/.bun/bin/bun install --backend=copyfile"
         ;;
-    debug)
-        # Run with debug flags
+    serve)
+        # Headless server - no PTY needed
         shift
         ARGS=$(printf '%q ' "$@")
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $OC_CMD serve $ARGS"
+        ;;
+    debug)
+        # TUI with debug flags + script PTY wrapper
+        shift
+        ARGS=$(printf '%q ' "$@")
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
         ;;
     safe)
-        # Run with safe mode (no alternate screen, reduced features)
+        # TUI with safe mode (no alternate screen) + script PTY wrapper
         shift
         ARGS=$(printf '%q ' "$@")
-        echo "Running OpenCode in safe mode (no alternate screen)..."
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $SAFE_MODE_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $SAFE_MODE_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
         ;;
-    serve)
-        # Run headless server
+    no-pty)
+        # TUI without PTY wrapper (for comparison/debugging)
         shift
         ARGS=$(printf '%q ' "$@")
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts serve $ARGS"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $OC_CMD $ARGS"
         ;;
     test-tui)
-        # Comprehensive TUI diagnostic test
         echo "=== OpenCode TUI Diagnostic Test ==="
         exec proot-distro login "$DISTRO" -- bash -c '
-            echo "1. System Info:"
-            echo "   Architecture: $(uname -m)"
-            echo "   Platform: $(uname -s)"
+            BUN="$HOME/.bun/bin/bun"
+            echo "1. System: $(uname -m) / $(uname -s)"
+            echo "2. Bun: $($BUN --version)"
             echo ""
-            echo "2. Bun Info:"
-            ~/.bun/bin/bun --version
-            echo ""
-            echo "3. OpenTUI Native Library Check:"
+
+            echo "3. Native Library:"
             cd ~/opencode
-            # Check for arm64 library
-            if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
-                echo "   [OK] @opentui/core-linux-arm64 found"
-                ls -la node_modules/@opentui/core-linux-arm64/
-            elif [ -d "node_modules/.bun/node_modules/@opentui/core-linux-arm64" ]; then
-                echo "   [OK] @opentui/core-linux-arm64 found in .bun"
-                ls -la node_modules/.bun/node_modules/@opentui/core-linux-arm64/
+            SO=$(find node_modules -name "libopentui.so" -type f 2>/dev/null | head -1)
+            if [ -n "$SO" ]; then
+                echo "   [OK] $SO"
+                file "$SO" 2>/dev/null
+                echo "   ldd output:"
+                ldd "$SO" 2>&1 | head -15 | sed "s/^/   /"
             else
-                echo "   [ERROR] @opentui/core-linux-arm64 NOT FOUND!"
-                echo "   Available @opentui packages:"
-                find node_modules -name "@opentui" -type d 2>/dev/null | head -5
+                echo "   [FAIL] libopentui.so NOT FOUND"
             fi
             echo ""
-            echo "4. libopentui.so Check:"
-            SO_FILE=$(find node_modules -name "libopentui.so" -type f 2>/dev/null | head -1)
-            if [ -n "$SO_FILE" ]; then
-                echo "   [OK] Found: $SO_FILE"
-                file "$SO_FILE" 2>/dev/null || echo "   (file command not available)"
-            else
-                echo "   [ERROR] libopentui.so NOT FOUND!"
-            fi
-            echo ""
-            echo "5. FFI Test (quick import check):"
+
+            echo "4. FFI dlopen test:"
             cd packages/opencode
-            ~/.bun/bin/bun -e "
-                console.log(\"   Importing @opentui/core...\");
+            $BUN -e "
                 try {
-                    const core = await import(\"@opentui/core\");
-                    console.log(\"   [OK] @opentui/core loaded successfully\");
-                    console.log(\"   Available exports:\", Object.keys(core).slice(0, 10).join(\", \"), \"...\");
+                    // Step 1: resolve native lib path
+                    const m = await import(\`@opentui/core-\${process.platform}-\${process.arch}/index.ts\`);
+                    const libPath = m.default;
+                    console.log(\"   [OK] Native module path:\", libPath);
+
+                    // Step 2: dlopen
+                    const { dlopen } = await import(\"bun:ffi\");
+                    const lib = dlopen(libPath, {
+                        createRenderer: { args: [\"u32\", \"u32\", \"bool\"], returns: \"ptr\" },
+                        destroyRenderer: { args: [\"ptr\"], returns: \"void\" },
+                    });
+                    console.log(\"   [OK] dlopen succeeded\");
+
+                    // Step 3: create renderer
+                    const ptr = lib.symbols.createRenderer(80, 24, false);
+                    console.log(\"   [OK] createRenderer returned ptr:\", ptr);
+                    if (ptr) lib.symbols.destroyRenderer(ptr);
+                    console.log(\"   [OK] FFI fully working!\");
                 } catch (e) {
-                    console.log(\"   [ERROR] Failed to load @opentui/core:\", e.message);
+                    console.log(\"   [FAIL]\", e.message);
+                    if (e.stack) console.log(e.stack.split(\"\\n\").slice(0,3).join(\"\\n\"));
                 }
             " 2>&1
             echo ""
-            echo "6. OpenCode --help:"
-            ~/.bun/bin/bun run --conditions=browser ./src/index.ts --help 2>&1 | head -20
+
+            echo "5. Full import test:"
+            $BUN -e "
+                try {
+                    const core = await import(\"@opentui/core\");
+                    console.log(\"   [OK] @opentui/core loaded\");
+                } catch (e) {
+                    console.log(\"   [FAIL]\", e.message);
+                }
+            " 2>&1
             echo ""
-            echo "=== Diagnostic Complete ==="
+
+            echo "6. Terminal info:"
+            echo "   TERM=$TERM"
+            echo "   COLORTERM=$COLORTERM"
+            echo "   tty: $(tty 2>/dev/null || echo none)"
+            echo "   stty size: $(stty size 2>/dev/null || echo unknown)"
+            echo ""
+
+            echo "7. OpenCode --help:"
+            $BUN run --conditions=browser ./src/index.ts --help 2>&1 | head -10
+            echo ""
+            echo "=== Done ==="
         '
         ;;
-    tui-minimal)
-        # Test minimal TUI creation
-        echo "=== Minimal TUI Test ==="
-        echo "This will try to create a basic TUI renderer..."
-        exec proot-distro login "$DISTRO" -- bash -c "
-            $OPENTUI_ENV
-            $DEBUG_ENV
-            cd ~/opencode/packages/opencode
-            ~/.bun/bin/bun -e '$MINIMAL_TUI_TEST'
-        "
-        ;;
     reinstall)
-        # Reinstall dependencies
-        echo "Reinstalling dependencies..."
+        echo "Reinstalling dependencies (clean)..."
         exec proot-distro login "$DISTRO" -- bash -c "
             $OPENTUI_ENV
             cd ~/opencode
-            rm -rf node_modules
+            rm -rf node_modules packages/opencode/node_modules
+            rm -rf ~/.bun/install/cache
             ~/.bun/bin/bun install --backend=copyfile
         "
         ;;
     *)
-        # Run OpenCode with arguments
+        # Default: Run TUI with script PTY wrapper for proper terminal I/O
         if [ $# -eq 0 ]; then
-            # No arguments - run TUI
-            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts"
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD' /dev/null"
         else
-            # Pass arguments to OpenCode
             ARGS=$(printf '%q ' "$@")
-            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts $ARGS"
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
         fi
         ;;
 esac
