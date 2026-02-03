@@ -66,6 +66,16 @@ process.on("uncaughtException", (e) => {
   })
 })
 
+// Handle SIGINT/SIGTERM for clean shutdown.
+// In proot/Termux, Bun's TUI mode ignores SIGINT by default, which leaves zombie
+// processes that block subsequent launches. Force exit on these signals.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    Log.Default.info("signal", { signal })
+    process.exit(0)
+  })
+}
+
 const cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
   .scriptName("opencode")

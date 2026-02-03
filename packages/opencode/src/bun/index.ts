@@ -4,7 +4,7 @@ import { Log } from "../util/log"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
 import { NamedError } from "@opencode-ai/util/error"
-import { file, write, spawn, readableStreamToText, isBun, which as whichBin } from "../compat"
+import { file, write, spawn, readableStreamToText, isBun, which as whichBin, isArmLinux } from "../compat"
 import { createRequire } from "module"
 import { Lock } from "../util/lock"
 
@@ -20,7 +20,7 @@ export namespace BunProc {
   export async function run(cmd: string[], options?: { cwd?: string; env?: Record<string, string | undefined> }) {
     // Determine the actual command based on runtime
     const fullCmd = isBun ? [which(), ...cmd] : buildNodeCommand(cmd)
-    
+
     log.info("running", {
       cmd: fullCmd,
       runtime: isBun ? "bun" : "node",
@@ -63,7 +63,7 @@ export namespace BunProc {
    */
   function buildNodeCommand(cmd: string[]): string[] {
     const [subCmd, ...args] = cmd
-    
+
     switch (subCmd) {
       case "x":
         // bun x pkg args -> npx pkg args
@@ -71,7 +71,7 @@ export namespace BunProc {
       case "add":
       case "install":
         // bun add/install -> npm install
-        return ["npm", "install", ...args.filter(a => a !== "--force" && a !== "--no-cache")]
+        return ["npm", "install", ...args.filter((a) => a !== "--force" && a !== "--no-cache")]
       case "run":
         // bun run script.js -> node script.js
         return ["node", ...args]
@@ -152,6 +152,109 @@ export namespace BunProc {
     }),
   )
 
+  /**
+   * Install a single package from npm via tarball download + extraction.
+   * Returns the resolved version string.
+   */
+  async function fetchAndExtractTarball(pkg: string, version: string, nodeModulesDir: string): Promise<string> {
+    // Get the tarball URL from the npm registry
+    // Scoped packages (e.g. @gitlab/foo) need URL-encoded scope in the registry URL
+    const encodedPkg = pkg.startsWith("@") ? `@${encodeURIComponent(pkg.slice(1))}` : pkg
+    const registryUrl = `https://registry.npmjs.org/${encodedPkg}/${version}`
+    const response = await fetch(registryUrl)
+    if (!response.ok) throw new Error(`Failed to fetch ${pkg}@${version}: ${response.status}`)
+    const info = (await response.json()) as { dist?: { tarball?: string }; version?: string }
+    const tarballUrl = info.dist?.tarball
+    if (!tarballUrl) throw new Error(`No tarball URL found for ${pkg}@${version}`)
+
+    // Download the tarball
+    const tarballResponse = await fetch(tarballUrl)
+    if (!tarballResponse.ok) throw new Error(`Failed to download tarball: ${tarballResponse.status}`)
+    const tarballData = new Uint8Array(await tarballResponse.arrayBuffer())
+
+    // Write tarball to temp file
+    const safeName = pkg.replace(/\//g, "-").replace(/^@/, "")
+    const tarballPath = path.join(nodeModulesDir, `_${safeName}.tgz`)
+    await write(tarballPath, tarballData)
+
+    // Ensure the target directory exists and is clean
+    const modDir = path.join(nodeModulesDir, pkg)
+    const rmResult = spawn(["rm", "-rf", modDir], { stdout: "pipe", stderr: "pipe" })
+    await rmResult.exited
+    const mkdirResult = spawn(["mkdir", "-p", modDir], { stdout: "pipe", stderr: "pipe" })
+    await mkdirResult.exited
+
+    // Extract tarball (npm tarballs have a `package/` prefix)
+    const extractResult = spawn(["tar", "xzf", tarballPath, "-C", modDir, "--strip-components=1"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const extractCode = await extractResult.exited
+    if (extractCode !== 0) {
+      const stderrText = extractResult.stderr
+        ? typeof extractResult.stderr === "number"
+          ? String(extractResult.stderr)
+          : await readableStreamToText(extractResult.stderr)
+        : ""
+      throw new Error(`Failed to extract tarball for ${pkg}: exit ${extractCode} ${stderrText}`)
+    }
+
+    // Clean up tarball
+    spawn(["rm", "-f", tarballPath], { stdout: "pipe", stderr: "pipe" })
+
+    return info.version ?? version
+  }
+
+  /**
+   * Repair empty packages in node_modules after a broken `bun add`.
+   * On ARM Linux / proot, bun creates directory structures but fails to extract files.
+   * This scans all installed directories and re-installs any empty ones via tarball.
+   */
+  async function repairEmptyPackages(nodeModulesDir: string) {
+    // List all directories in node_modules (including scoped packages)
+    const listResult = spawn(
+      [
+        "sh",
+        "-c",
+        `for d in "${nodeModulesDir}"/*/; do [ -d "$d" ] && echo "$d"; done; for d in "${nodeModulesDir}"/@*/*/; do [ -d "$d" ] && echo "$d"; done`,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    )
+    await listResult.exited
+    const dirs =
+      listResult.stdout && typeof listResult.stdout !== "number"
+        ? (await readableStreamToText(listResult.stdout)).trim().split("\n").filter(Boolean)
+        : []
+
+    let repaired = 0
+    for (const dir of dirs) {
+      // Skip . files and the parent scope dirs
+      const relative = dir.replace(nodeModulesDir + "/", "").replace(/\/$/, "")
+      if (relative.startsWith(".") || !relative) continue
+      // Skip scope directories themselves (e.g. @openauthjs/) - only process @scope/pkg
+      if (relative.startsWith("@") && !relative.includes("/")) continue
+
+      const pkgJsonPath = path.join(dir, "package.json")
+      const pkgJsonFile = file(pkgJsonPath)
+      const exists = await pkgJsonFile.exists().catch(() => false)
+      if (exists) continue
+
+      // This package directory is empty - try to repair it
+      // Read the version from the lockfile or just use "latest"
+      log.warn("repairing empty package", { pkg: relative })
+      try {
+        await fetchAndExtractTarball(relative, "latest", nodeModulesDir)
+        repaired++
+      } catch (e) {
+        log.error("failed to repair package", { pkg: relative, error: String(e) })
+      }
+    }
+
+    if (repaired > 0) {
+      log.info("repaired empty packages", { count: repaired })
+    }
+  }
+
   export async function install(pkg: string, version = "latest") {
     // Use lock to ensure only one install at a time
     using _ = await Lock.write("bun-install")
@@ -167,7 +270,13 @@ export namespace BunProc {
     const dependencies = parsed.dependencies ?? {}
     if (!parsed.dependencies) parsed.dependencies = dependencies
     const modExists = await Filesystem.exists(mod)
-    if (dependencies[pkg] === version && modExists) return mod
+    if (dependencies[pkg] === version && modExists) {
+      // Double-check the package actually has files (bun bug on ARM Linux creates empty dirs)
+      const modPkgJson = file(path.join(mod, "package.json"))
+      const modPkgExists = await modPkgJson.exists().catch(() => false)
+      if (modPkgExists) return mod
+      log.warn("package directory exists but is empty, reinstalling", { pkg, version })
+    }
 
     const proxied = !!(
       process.env.HTTP_PROXY ||
@@ -176,12 +285,18 @@ export namespace BunProc {
       process.env.https_proxy
     )
 
+    // On Termux/proot (ARM Linux), bun needs --backend=copyfile because
+    // Android SELinux blocks hardlinks. The env var can be set by the launcher,
+    // or we auto-detect ARM Linux as a fallback.
+    const needsCopyfile = isBun && (!!process.env.OPENCODE_BUN_BACKEND || isArmLinux)
+
     // Build command arguments - use npm on Node.js, bun add on Bun
     const args = isBun
       ? [
           "add",
           "--force",
           "--exact",
+          ...(needsCopyfile ? ["--backend=copyfile"] : []),
           ...(proxied ? ["--no-cache"] : []),
           "--cwd",
           Global.Path.cache,
@@ -193,6 +308,7 @@ export namespace BunProc {
       pkg,
       version,
       runtime: isBun ? "bun" : "node",
+      needsCopyfile,
     })
 
     await BunProc.run(args, {
@@ -206,11 +322,26 @@ export namespace BunProc {
       )
     })
 
-    // Resolve actual version from installed package when using "latest"
+    // Verify the package was actually installed correctly.
+    // On ARM Linux / proot, bun creates empty directories (all backends affected).
+    // Fall back to direct tarball download + extraction if the package.json is missing.
+    const nodeModulesDir = path.join(Global.Path.cache, "node_modules")
+    const installedPkgJsonPath = path.join(mod, "package.json")
+    const installedPkgJsonFile = file(installedPkgJsonPath)
+    const pkgJsonExists = await installedPkgJsonFile.exists().catch(() => false)
+
     let resolvedVersion = version
-    if (version === "latest") {
-      const installedPkgJson = file(path.join(mod, "package.json"))
-      const installedPkg = await installedPkgJson.json().catch(() => null)
+    if (!pkgJsonExists) {
+      log.warn("bun add created empty directories, repairing all packages via tarball", { pkg, version })
+      // Repair ALL empty packages (the main one and its dependencies)
+      await repairEmptyPackages(nodeModulesDir)
+      // Read the resolved version from the now-populated package
+      const repairedPkgJson = (await file(installedPkgJsonPath)
+        .json()
+        .catch(() => null)) as { version?: string } | null
+      resolvedVersion = repairedPkgJson?.version ?? version
+    } else if (version === "latest") {
+      const installedPkg = (await installedPkgJsonFile.json().catch(() => null)) as { version?: string } | null
       if (installedPkg?.version) {
         resolvedVersion = installedPkg.version
       }

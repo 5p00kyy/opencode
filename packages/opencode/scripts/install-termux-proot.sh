@@ -725,6 +725,7 @@ export OPENTUI_FORCE_WCWIDTH=true
 export OPENTUI_NO_GRAPHICS=true
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+export OPENCODE_BUN_BACKEND=copyfile
 '
 
 # Debug additions
@@ -742,6 +743,33 @@ export OTUI_USE_ALTERNATE_SCREEN=false
 # The bun command to launch opencode TUI
 OC_CMD='cd ~/opencode && ~/.bun/bin/bun run --cwd packages/opencode --conditions=browser ./src/index.ts'
 
+# Pre-launch cleanup: kill any zombie opencode/bun processes left from previous runs.
+# In proot, SIGINT (Ctrl+C) is ignored by Bun's TUI mode, so processes survive after
+# the user exits. This ensures a clean slate before each launch.
+cleanup_previous() {
+    proot-distro login "$DISTRO" -- bash -c '
+        KILLED=0
+        # Kill any lingering bun processes running opencode
+        for PID in $(ps aux 2>/dev/null | grep -E "bun.*index\.ts|bun.*opencode" | grep -v grep | awk "{print \$2}"); do
+            kill -TERM "$PID" 2>/dev/null
+            KILLED=$((KILLED + 1))
+        done
+        if [ "$KILLED" -gt 0 ]; then
+            sleep 1
+            # Force kill any that survived SIGTERM
+            for PID in $(ps aux 2>/dev/null | grep -E "bun.*index\.ts|bun.*opencode" | grep -v grep | awk "{print \$2}"); do
+                kill -9 "$PID" 2>/dev/null
+            done
+            sleep 1
+        fi
+        # Fix broken plugin cache (opencode-anthropic-auth installs without package.json)
+        PLUGIN_CACHE="$HOME/.cache/opencode/node_modules/opencode-anthropic-auth"
+        if [ -d "$PLUGIN_CACHE" ] && [ ! -f "$PLUGIN_CACHE/package.json" ]; then
+            rm -rf "$PLUGIN_CACHE"
+        fi
+    ' 2>/dev/null
+}
+
 # Check if proot-distro is available
 if ! command -v proot-distro &> /dev/null; then
     echo "Error: proot-distro not found. Please reinstall."
@@ -753,6 +781,47 @@ case "$1" in
     shell)
         shift
         exec proot-distro login "$DISTRO" "$@"
+        ;;
+    stop)
+        echo "Stopping all OpenCode processes..."
+        proot-distro login "$DISTRO" -- bash -c '
+            FOUND=0
+            for PID in $(ps aux 2>/dev/null | grep -E "bun.*index\.ts|bun.*opencode" | grep -v grep | awk "{print \$2}"); do
+                echo "  Killing PID $PID"
+                kill -TERM "$PID" 2>/dev/null
+                FOUND=$((FOUND + 1))
+            done
+            if [ "$FOUND" -eq 0 ]; then
+                echo "  No running OpenCode processes found."
+            else
+                sleep 2
+                # Force kill survivors
+                for PID in $(ps aux 2>/dev/null | grep -E "bun.*index\.ts|bun.*opencode" | grep -v grep | awk "{print \$2}"); do
+                    kill -9 "$PID" 2>/dev/null
+                done
+                echo "  Stopped $FOUND process(es)."
+            fi
+        '
+        ;;
+    status)
+        echo "=== OpenCode PRoot Status ==="
+        proot-distro login "$DISTRO" -- bash -c '
+            echo "Processes:"
+            PROCS=$(ps aux 2>/dev/null | grep -E "bun.*index\.ts|bun.*opencode" | grep -v grep)
+            if [ -n "$PROCS" ]; then
+                echo "$PROCS" | sed "s/^/  /"
+            else
+                echo "  No running processes"
+            fi
+            echo ""
+            echo "Recent log:"
+            LOG="$HOME/.local/share/opencode/log/dev.log"
+            if [ -f "$LOG" ]; then
+                tail -5 "$LOG" | sed "s/^/  /"
+            else
+                echo "  No log file"
+            fi
+        '
         ;;
     update)
         exec proot-distro login "$DISTRO" -- bash -c '
@@ -780,24 +849,28 @@ case "$1" in
     serve)
         # Headless server - no PTY needed
         shift
+        cleanup_previous
         ARGS=$(printf '%q ' "$@")
         exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $OC_CMD serve $ARGS"
         ;;
     debug)
         # TUI with debug flags + script PTY wrapper
         shift
+        cleanup_previous
         ARGS=$(printf '%q ' "$@")
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $DEBUG_ENV script -qfc '$OC_CMD $ARGS' /dev/null; stty sane 2>/dev/null; printf '\e[?1049l' 2>/dev/null"
         ;;
     safe)
         # TUI with safe mode (no alternate screen) + script PTY wrapper
         shift
+        cleanup_previous
         ARGS=$(printf '%q ' "$@")
-        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $SAFE_MODE_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
+        exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $SAFE_MODE_ENV script -qfc '$OC_CMD $ARGS' /dev/null; stty sane 2>/dev/null"
         ;;
     no-pty)
         # TUI without PTY wrapper (for comparison/debugging)
         shift
+        cleanup_previous
         ARGS=$(printf '%q ' "$@")
         exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV $OC_CMD $ARGS"
         ;;
@@ -951,11 +1024,12 @@ case "$1" in
         ;;
     *)
         # Default: Run TUI with script PTY wrapper for proper terminal I/O
+        cleanup_previous
         if [ $# -eq 0 ]; then
-            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD' /dev/null"
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD' /dev/null; stty sane 2>/dev/null; printf '\e[?1049l' 2>/dev/null"
         else
             ARGS=$(printf '%q ' "$@")
-            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD $ARGS' /dev/null"
+            exec proot-distro login "$DISTRO" -- bash -c "$OPENTUI_ENV script -qfc '$OC_CMD $ARGS' /dev/null; stty sane 2>/dev/null; printf '\e[?1049l' 2>/dev/null"
         fi
         ;;
 esac

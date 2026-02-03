@@ -14,7 +14,12 @@ export const ServeCommand = cmd({
     const opts = await resolveNetworkOptions(args)
     const server = await Server.listen(opts)
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
-    await new Promise(() => {})
+    // Wait until process receives a shutdown signal
+    await new Promise<void>((resolve) => {
+      for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+        process.on(signal, () => resolve())
+      }
+    })
     await server.stop()
   },
 })
